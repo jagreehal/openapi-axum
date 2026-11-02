@@ -1,0 +1,5 @@
+error: 700 is not an HTTP status code
+  --> tests/ui/fail/status_out_of_range.rs:25:5
+   |
+25 |     #[status(700)]
+   |     ^

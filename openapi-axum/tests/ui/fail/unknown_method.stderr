@@ -1,0 +1,5 @@
+error: expected one of GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE
+  --> tests/ui/fail/unknown_method.rs:23:9
+   |
+23 | #[route(FETCH, "/pets")]
+   |         ^^^^^

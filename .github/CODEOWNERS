@@ -1,0 +1,9 @@
+# Release-critical paths: changes here can alter what gets published to crates.io.
+# Owned by a separate admin identity so release changes need its review.
+/.github/workflows/              @jaggitadmin
+/.github/CODEOWNERS              @jaggitadmin
+/Cargo.toml                      @jaggitadmin
+/Cargo.lock                      @jaggitadmin
+/openapi-axum/Cargo.toml         @jaggitadmin
+/openapi-axum-macros/Cargo.toml  @jaggitadmin
+/deny.toml                       @jaggitadmin

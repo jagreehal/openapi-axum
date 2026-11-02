@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Weekly: new RustSec advisories land without any code change here.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # Every feature on its own, plus none: catches code that only compiles with
+      # another feature switched on.
+      - run: cargo hack clippy -p openapi-axum --each-feature --all-targets -- -D warnings
+      - run: cargo hack test -p openapi-axum --each-feature
+      - run: cargo test --workspace --all-targets --all-features
+      # `--all-targets` skips rustdoc tests; run them so doc examples keep compiling.
+      - run: cargo test -p openapi-axum --doc --all-features
+      - run: cargo doc -p openapi-axum --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo package -p openapi-axum-macros
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    env:
+      # rust-toolchain.toml pins the dev toolchain; this overrides it.
+      RUSTUP_TOOLCHAIN: "1.88.0"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p openapi-axum --lib --all-features
+      - run: cargo check -p openapi-axum --lib --no-default-features
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      # Advisories, licences, banned crates and sources: policy in deny.toml.
+      - run: cargo deny check

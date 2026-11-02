@@ -1,0 +1,5 @@
+error: add a return type; the response docs are derived from it
+  --> tests/ui/fail/missing_return_type.rs:24:1
+   |
+24 | async fn get() {}
+   | ^^^^^

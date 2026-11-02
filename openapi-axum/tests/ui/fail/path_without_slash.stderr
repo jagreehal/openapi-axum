@@ -1,0 +1,5 @@
+error: path must start with `/`
+  --> tests/ui/fail/path_without_slash.rs:23:14
+   |
+23 | #[route(GET, "pets")]
+   |              ^^^^^^

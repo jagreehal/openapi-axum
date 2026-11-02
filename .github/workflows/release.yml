@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    environment: main
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Tag matches both crate versions
+        run: |
+          for crate in openapi-axum openapi-axum-macros; do
+            VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name==\"$crate\") | .version")
+            test "v${VERSION}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != $crate v${VERSION}"; exit 1; }
+          done
+      - run: cargo test --workspace --all-targets --all-features
+      # The macros crate first: openapi-axum depends on it by version.
+      - run: cargo publish -p openapi-axum-macros
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - run: cargo publish -p openapi-axum
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

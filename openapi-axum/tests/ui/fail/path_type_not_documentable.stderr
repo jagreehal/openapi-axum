@@ -1,0 +1,29 @@
+error[E0599]: the method `document_path` exists for reference `&&&PhantomData<Opaque>`, but its trait bounds were not satisfied
+  --> tests/ui/fail/path_type_not_documentable.rs:28:30
+   |
+25 | struct Opaque(u32);
+   | ------------- doesn't satisfy `Opaque: IntoParams`, `Opaque: PathValue` or `Opaque: ToSchema`
+...
+28 | async fn get(Path(_id): Path<Opaque>) -> Result<Json<Pet>, ApiError> {
+   |                              ^^^^^^ method cannot be called on `&&&PhantomData<Opaque>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `Opaque: IntoParams`
+           which is required by `&&PhantomData<Opaque>: openapi_axum::__private::ViaParams`
+           `Opaque: ToSchema`
+           which is required by `&PhantomData<Opaque>: openapi_axum::__private::ViaSchema`
+           `Opaque: PathValue`
+           which is required by `PhantomData<Opaque>: openapi_axum::__private::ViaValue`
+note: the traits `IntoParams`, `PathValue`,  and `ToSchema` must be implemented
+  --> $CARGO/utoipa-$VERSION/src/lib.rs
+   |
+   | pub trait ToSchema: PartialSchema {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   | pub trait IntoParams {
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+  ::: src/doc.rs
+   |
+   | pub trait PathValue {
+   | ^^^^^^^^^^^^^^^^^^^

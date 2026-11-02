@@ -1,0 +1,5 @@
+error: path `/pets/{owner}/{id}` has 2 param(s) ["owner", "id"] but this tuple extracts 3
+  --> tests/ui/fail/tuple_arity.rs:25:39
+   |
+25 | async fn get(Path((_o, id, _x)): Path<(String, u32, u8)>) -> Result<Json<Pet>, ApiError> {
+   |                                       ^^^^^^^^^^^^^^^^^

@@ -1,0 +1,46 @@
+error[E0277]: the trait bound `NoSchema: ToSchema` is not satisfied
+  --> tests/ui/fail/body_needs_schema.rs:27:10
+   |
+27 | #[derive(ApiResponse)]
+   |          ^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `ToSchema` is not implemented for `NoSchema`
+  --> tests/ui/fail/body_needs_schema.rs:25:1
+   |
+25 | struct NoSchema { x: u8 }
+   | ^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `ToSchema`:
+             &'t [T]
+             &'t mut [T]
+             &str
+             ()
+             BTreeMap<K, T>
+             BTreeSet<K>
+             Box<T>
+             Cow<'a, T>
+           and $N others
+   = note: this error originates in the derive macro `ApiResponse` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NoSchema: PartialSchema` is not satisfied
+  --> tests/ui/fail/body_needs_schema.rs:27:10
+   |
+27 | #[derive(ApiResponse)]
+   |          ^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `utoipa::__dev::ComposeSchema` is not implemented for `NoSchema`
+  --> tests/ui/fail/body_needs_schema.rs:25:1
+   |
+25 | struct NoSchema { x: u8 }
+   | ^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `utoipa::__dev::ComposeSchema`:
+             &[T]
+             &mut [T]
+             &str
+             BTreeMap<K, T>
+             BTreeSet<K>
+             Box<T>
+             Cow<'a, T>
+             HashMap<K, T, S>
+           and $N others
+   = note: required for `NoSchema` to implement `PartialSchema`
+   = note: this error originates in the derive macro `ApiResponse` (in Nightly builds, run with -Z macro-backtrace for more info)

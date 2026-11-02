@@ -1,0 +1,15 @@
+error[E0277]: `StatusCode` doesn't describe its responses
+  --> tests/ui/fail/return_not_documentable.rs:25:19
+   |
+25 | async fn get() -> axum::http::StatusCode {
+   |                   ^^^^^^^^^^^^^^^^^^^^^^ the trait `ApiResponse` is not implemented for `StatusCode`
+   |
+   = note: return `Json<T>`, `Created<T>`, `NoContent`, a `Result` of those, or a type with `#[derive(ApiResponse)]`
+   = help: the following other types implement trait `ApiResponse`:
+             &'static str
+             Accepted<T>
+             ApiError
+             Created<T>
+             Result<T, E>
+             openapi_axum::NoContent
+             std::string::String

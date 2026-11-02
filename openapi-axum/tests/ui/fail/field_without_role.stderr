@@ -1,0 +1,5 @@
+error: mark each field `#[body]` or `#[header("Name")]` so it's both sent and documented
+  --> tests/ui/fail/field_without_role.rs:26:15
+   |
+26 |     Created { location: String, #[body] pet: Pet },
+   |               ^^^^^^^^

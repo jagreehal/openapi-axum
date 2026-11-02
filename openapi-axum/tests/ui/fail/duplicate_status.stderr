@@ -1,0 +1,5 @@
+error: status 400 is already used by `Invalid`; OpenAPI allows one response per status
+  --> tests/ui/fail/duplicate_status.rs:29:5
+   |
+29 |     Malformed(Problem),
+   |     ^^^^^^^^^

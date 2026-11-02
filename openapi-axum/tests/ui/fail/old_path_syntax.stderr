@@ -1,0 +1,5 @@
+error: axum 0.8 uses `{id}`, not `:id`
+  --> tests/ui/fail/old_path_syntax.rs:24:14
+   |
+24 | #[route(GET, "/pets/:id")]
+   |              ^^^^^^^^^^^

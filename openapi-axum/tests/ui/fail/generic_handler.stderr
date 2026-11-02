@@ -1,0 +1,5 @@
+error: #[route] handlers can't be generic
+  --> tests/ui/fail/generic_handler.rs:24:13
+   |
+24 | async fn get<T>() -> Json<Pet> { Json(Pet { id: 1 }) }
+   |             ^

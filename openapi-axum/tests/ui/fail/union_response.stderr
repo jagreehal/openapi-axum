@@ -1,0 +1,5 @@
+error: unions aren't supported
+  --> tests/ui/fail/union_response.rs:25:7
+   |
+25 | union Bad { a: u32 }
+   |       ^^^

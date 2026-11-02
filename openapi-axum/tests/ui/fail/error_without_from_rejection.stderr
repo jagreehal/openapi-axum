@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `Plain: From<Rejection>` is not satisfied
+  --> tests/ui/fail/error_without_from_rejection.rs:31:38
+   |
+31 | async fn get(Path(id): Path<u32>) -> Result<Json<Pet>, Plain> {
+   |                                      ^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `From<Rejection>` is not implemented for `Plain`
+  --> tests/ui/fail/error_without_from_rejection.rs:25:1
+   |
+25 | enum Plain {
+   | ^^^^^^^^^^
+help: the trait `openapi_axum::__private::FromRejection` is implemented for `Result<T, E>`
+  --> src/rejection.rs
+   |
+   | impl<T, E: From<Rejection>> FromRejection for Result<T, E> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: required for `Result<axum::Json<Pet>, Plain>` to implement `openapi_axum::__private::FromRejection`
+note: required by a bound in `openapi_axum::__private::reject`
+  --> src/rejection.rs
+   |
+   | pub fn reject<R: FromRejection + IntoResponse>(r: Rejection) -> R {
+   |                  ^^^^^^^^^^^^^ required by this bound in `reject`

@@ -1,0 +1,69 @@
+[package]
+name = "openapi-axum"
+description = "OpenAPI for axum, derived from your handler signatures and enforced at runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["axum", "openapi", "utoipa", "rest", "api"]
+readme = "../README.md"
+documentation = "https://docs.rs/openapi-axum"
+homepage.workspace = true
+categories = ["web-programming::http-server"]
+
+[features]
+default = ["tracing", "validation"]
+## Validate JSON request bodies against their published schema.
+validation = ["dep:jsonschema"]
+## `openapi_axum::testing`: check a router against its own docs (requests built only from the spec).
+testing = ["validation", "dep:tower", "dep:http-body-util"]
+## Wrap each handler in a span named after its operationId (nests under any server span).
+tracing = ["dep:tracing"]
+## `Path<Uuid>` support.
+uuid = ["dep:uuid", "utoipa/uuid"]
+## `Path<DateTime<_>>` / `Path<NaiveDate>` support.
+chrono = ["dep:chrono", "utoipa/chrono"]
+
+[dependencies]
+openapi-axum-macros.workspace = true
+axum = { version = "0.8", default-features = false, features = ["json", "query", "form", "matched-path"] }
+utoipa = "6"
+serde = "1"
+serde_json = "1"
+tower-layer = "0.3"
+tower-service = "0.3"
+tracing = { version = "0.1", optional = true }
+jsonschema = { version = "0.60", optional = true, default-features = false }
+serde_urlencoded = "0.7"
+tower = { version = "0.5", optional = true, default-features = false, features = ["util"] }
+http-body-util = { version = "0.1", optional = true }
+uuid = { version = "1", optional = true, default-features = false }
+chrono = { version = "0.4", optional = true, default-features = false }
+
+[dev-dependencies]
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+serde = { version = "1", features = ["derive"] }
+utoipa = { version = "6", features = ["uuid"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+trybuild = "1"
+jsonschema = { version = "0.60", default-features = false }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "conformance"
+required-features = ["uuid", "validation", "testing"]
+
+[[test]]
+name = "features"
+required-features = ["uuid", "validation", "testing"]
+
+[[test]]
+name = "guarantees"
+required-features = ["validation", "testing"]

@@ -1,0 +1,5 @@
+error: missing `#[status(..)]`, e.g. `#[status(404)]` or `#[status(NOT_FOUND)]`
+  --> tests/ui/fail/missing_status.rs:26:5
+   |
+26 |     NotFound(Problem),
+   |     ^^^^^^^^

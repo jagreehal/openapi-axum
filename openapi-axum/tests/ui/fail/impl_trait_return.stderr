@@ -1,0 +1,5 @@
+error: return a concrete type (e.g. `Result<Json<T>, ApiError>`); the docs are derived from it
+  --> tests/ui/fail/impl_trait_return.rs:25:19
+   |
+25 | async fn get() -> impl axum::response::IntoResponse {
+   |                   ^^^^

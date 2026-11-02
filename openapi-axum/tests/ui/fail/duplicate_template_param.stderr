@@ -1,0 +1,5 @@
+error: bad or duplicate path param `{id}`
+  --> tests/ui/fail/duplicate_template_param.rs:23:14
+   |
+23 | #[route(GET, "/pets/{id}/{id}")]
+   |              ^^^^^^^^^^^^^^^^^

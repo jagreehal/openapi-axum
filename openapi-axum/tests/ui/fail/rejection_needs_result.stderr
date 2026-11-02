@@ -1,0 +1,18 @@
+error[E0277]: `axum::Json<Pet>` can't carry extractor rejections
+  --> tests/ui/fail/rejection_needs_result.rs:25:38
+   |
+25 | async fn get(Path(id): Path<u32>) -> Json<Pet> {
+   |                                      ^^^^^^^^^ this handler uses Json/Path/Query/Form, so its return type must be able to report a bad request
+   |
+   = help: the trait `openapi_axum::__private::FromRejection` is not implemented for `axum::Json<Pet>`
+   = note: return `Result<_, E>` where `E: From<openapi_axum::Rejection>`, or mark the argument `#[raw]` to keep axum's default rejection
+help: the trait `openapi_axum::__private::FromRejection` is implemented for `Result<T, E>`
+  --> src/rejection.rs
+   |
+   | impl<T, E: From<Rejection>> FromRejection for Result<T, E> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `openapi_axum::__private::reject`
+  --> src/rejection.rs
+   |
+   | pub fn reject<R: FromRejection + IntoResponse>(r: Rejection) -> R {
+   |                  ^^^^^^^^^^^^^ required by this bound in `reject`

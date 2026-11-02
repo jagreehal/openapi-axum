@@ -1,0 +1,5 @@
+error: only one body extractor (Json/Form) per handler
+  --> tests/ui/fail/two_bodies.rs:24:53
+   |
+24 | async fn create(Json(p): Json<Pet>, axum::Form(_q): axum::Form<Pet>) -> Result<Json<Pet>, ApiError> { Ok(Json(p)) }
+   |                                                     ^^^^

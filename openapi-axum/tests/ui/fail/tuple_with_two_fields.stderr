@@ -1,0 +1,5 @@
+error: use a unit variant (no body), one unnamed body field `NotFound(ErrorBody)`, or named `#[body]`/`#[header]` fields
+  --> tests/ui/fail/tuple_with_two_fields.rs:26:7
+   |
+26 |     Ok(Pet, Pet),
+   |       ^^^^^^^^^^

@@ -1,0 +1,8 @@
+error[E0599]: no variant, associated function, or constant named `Conflict` found for enum `ApiError` in the current scope
+  --> tests/ui/fail/undocumented_status.rs:27:19
+   |
+15 | enum ApiError {
+   | ------------- variant, associated function, or constant `Conflict` not found for this enum
+...
+27 |     Err(ApiError::Conflict)
+   |                   ^^^^^^^^ variant, associated function, or constant not found in `ApiError`

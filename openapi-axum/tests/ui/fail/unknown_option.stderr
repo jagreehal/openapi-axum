@@ -1,0 +1,5 @@
+error: expected `tag`, `tags` or `operation_id`
+  --> tests/ui/fail/unknown_option.rs:23:23
+   |
+23 | #[route(GET, "/pets", summary = "x")]
+   |                       ^^^^^^^

@@ -1,0 +1,5 @@
+error: unknown status name; use the number instead, e.g. `#[status(418)]`
+  --> tests/ui/fail/unknown_status_name.rs:25:14
+   |
+25 |     #[status(IM_A_TEAPOT)]
+   |              ^^^^^^^^^^^

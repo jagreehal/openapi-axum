@@ -1,0 +1,5 @@
+error: only one `#[body]` field
+  --> tests/ui/fail/two_body_fields.rs:26:34
+   |
+26 |     Ok { #[body] a: Pet, #[body] b: Pet },
+   |                                  ^
