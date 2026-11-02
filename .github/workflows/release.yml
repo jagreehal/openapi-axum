@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: main
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.97.1
       - uses: Swatinem/rust-cache@v2
       - name: Tag matches both crate versions
