@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0
+
+Breaking:
+
+- `#[header]` fields must implement the new `ResponseHeader` trait: `HeaderText`, `http::HeaderValue`, or your own type. A `String` or other `Display` field is a compile error, with a message naming the replacements. A header is now a valid value before the response exists, so an invalid one can't turn a response into an undocumented `500`.
+- Header names in `#[header("...")]` are checked at compile time.
+
+Other changes:
+
+- Request validation checks `is_valid` first and builds error messages only for invalid input.
+- Route lookups clone an `Arc`, not the method and path strings.
+- Benchmarks: a hand-written-checks baseline (the same constraints checked in Rust, with no allocations over plain axum) and a `breakdown` benchmark showing where request validation's allocations go.
+
 ## 0.1.1
 
 - `verify_responses` reports each outcome as a `tracing` event (target `openapi_axum::verify`): `openapi.response_validation.passed`, `.skipped` (`body_too_large`, `unknown_length`, `streaming`) and `.failed` with a reason such as `schema_mismatch` or `status_not_documented`. You can now count how much traffic had its body checked.

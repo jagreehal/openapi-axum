@@ -94,7 +94,7 @@ Query and path structs can derive either `utoipa::IntoParams` or `utoipa::ToSche
 A response enum lists every status a handler can return. The same `#[status]` sets the status your client receives and the status in the docs.
 
 ```rust
-use openapi_axum::ApiResponse;
+use openapi_axum::{ApiResponse, HeaderText, InvalidHeaderText};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -107,7 +107,7 @@ enum CreateTodo {
     #[status(CREATED)]
     Created {
         #[header("Location")]
-        location: String,
+        location: HeaderText,
         #[body]
         todo: Todo,
     },
@@ -115,9 +115,17 @@ enum CreateTodo {
     #[status(409)]
     Conflict,
 }
+
+fn created(todo: Todo) -> Result<CreateTodo, InvalidHeaderText> {
+    let location = HeaderText::new(format!("/todos/{}", todo.id))?;
+    Ok(CreateTodo::Created { location, todo })
+}
+# assert!(created(Todo { id: 7 }).is_ok());
 ```
 
 `Location` goes out on every `Created` response and appears in the docs. Unit variants have no body. Generic enums work too.
+
+A `#[header]` field holds a `HeaderText` (or `http::HeaderValue`, or your own type implementing `ResponseHeader`). Each of those is a valid header value once it exists, so sending the header can't fail. `HeaderText::new` checks the text where you build it, and `HeaderText::from_static` takes a literal. A `String` field is a compile error, since a string can hold a newline. Header names are checked at compile time too.
 
 If you return `Result<_, E>`, `?` works with your domain errors through `From`. A handler can only produce the variants it has, so an undocumented status is a compile error.
 
@@ -187,6 +195,7 @@ These fail at compile time:
 - a body type or status the handler's return type doesn't allow,
 - a tuple path extractor whose length doesn't match the template,
 - duplicate statuses in a response enum, or a body on a `204`,
+- a `#[header]` field whose type isn't a valid header value by construction (a `String`, say), or an invalid header name,
 - extractors that can reject a request in a handler that has no error type to put the rejection in.
 
 These fail when the router is built, at startup or in your first test:
@@ -206,7 +215,7 @@ These need a test, using `assert_conforms`:
 - an `ExtractorDoc` that leaves out a header, credential or response its extractor needs,
 - a schema that serde can't satisfy, such as a custom deserializer stricter than the type's schema.
 
-The document can still describe less than your code does in a few places. A custom deserializer that accepts more than its type's schema gets rejected by validation until you describe it with `#[schema(schema_with = ...)]`. A `#[header]` value that isn't a valid HTTP header (a newline, say) turns that response into a `500`, which the docs don't list.
+The document can still describe less than your code does in one place. A custom deserializer that accepts more than its type's schema gets rejected by validation until you describe it with `#[schema(schema_with = ...)]`.
 
 To catch breaking changes between releases, commit your generated document and run a diff tool such as [oasdiff](https://github.com/oasdiff/oasdiff) on it in CI. That answers a different question from the checks above: whether the new document still works for clients that use the old one.
 
@@ -226,7 +235,7 @@ Handlers stay ordinary async functions, so a unit test can call `get_todo(State(
 
 ## Cost
 
-These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 7 µs to a 1 KB nested one, 59 to 92% more than plain axum on these small workloads. `verify_responses` adds about 1.6 µs and 11 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
+These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 6 µs to a 1 KB nested one, 52 to 81% more than plain axum on these small workloads. Most of that is the intermediate `serde_json::Value` the validator checks, not the validator. `verify_responses` adds about 1.5 µs and 10.5 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
 
 ### Choosing what to turn on
 

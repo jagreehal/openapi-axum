@@ -461,13 +461,14 @@ async fn verify(
         },
         None => matched.and_then(|m| index.by_matched_path(&method, &m)),
     };
-    let Some((doc_method, path)) = operation else { return res };
+    let Some(op) = operation else { return res };
+    let (doc_method, path) = (&op.0, &op.1);
     let at = format!("{doc_method} {path}");
     let content_type = res.headers().get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
     // Log mode may run on production traffic: never put response values in the message.
     let redact = mode == VerifyMode::Log;
     // Status and content type: no buffering needed.
-    if let Err(violation) = index.check_response_with(&doc_method, &path, res.status(), content_type, None, redact) {
+    if let Err(violation) = index.check_response_with(doc_method, path, res.status(), content_type, None, redact) {
         report(mode, &at, violation);
         return res;
     }
@@ -495,7 +496,7 @@ async fn verify(
         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let content_type = parts.headers.get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
-    match index.check_response_with(&doc_method, &path, parts.status, content_type, Some(&bytes), redact) {
+    match index.check_response_with(doc_method, path, parts.status, content_type, Some(&bytes), redact) {
         Ok(()) => outcome("passed", "body_checked", &at),
         Err(violation) => report(mode, &at, violation),
     }

@@ -56,9 +56,9 @@ enum CreatedPet {
     #[status(201)]
     Created {
         #[header("Location")]
-        location: String,
+        location: openapi_axum::HeaderText,
         #[header("X-Request-Id")]
-        request_id: Option<String>,
+        request_id: Option<openapi_axum::HeaderText>,
         #[body]
         pet: Pet,
     },
@@ -128,7 +128,9 @@ struct OwnerPet {
 #[route(POST, "/pets")]
 async fn create_pet(_auth: Bearer, Json(p): Json<NewPet>) -> Result<CreatedPet, PetError> {
     let pet = Pet { id: 7, name: p.name };
-    Ok(CreatedPet::Created { location: format!("/pets/{}", pet.id), request_id: None, pet })
+    let location = openapi_axum::HeaderText::new(format!("/pets/{}", pet.id))
+        .map_err(|e| PetError::BadRequest(Problem { message: e.to_string() }))?;
+    Ok(CreatedPet::Created { location, request_id: None, pet })
 }
 
 #[route(GET, "/pets")]

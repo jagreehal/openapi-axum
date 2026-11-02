@@ -79,9 +79,9 @@ enum CreatedPet {
     #[status(CREATED)]
     Created {
         #[header("Location")]
-        location: String,
+        location: openapi_axum::HeaderText,
         #[header("X-Optional-Trace")]
-        trace: Option<String>,
+        trace: Option<openapi_axum::HeaderText>,
         #[body]
         pet: Pet,
     },
@@ -181,7 +181,9 @@ async fn get_pet(Path(id): Path<u32>) -> Result<Json<Pet>, ApiError> {
 #[route(POST, "/pets")]
 async fn create_pet(_k: Key, Json(p): Json<NewPet>) -> Result<CreatedPet, ApiError> {
     let pet = Pet { id: 9, name: p.name, tag: None };
-    Ok(CreatedPet::Created { location: format!("/pets/{}", pet.id), trace: None, pet })
+    let location = openapi_axum::HeaderText::new(format!("/pets/{}", pet.id))
+        .map_err(|e| ApiError::BadRequest(Problem { code: "BAD_REQUEST".into(), message: e.to_string() }))?;
+    Ok(CreatedPet::Created { location, trace: None, pet })
 }
 
 #[route(PUT, "/pets/{id}")]

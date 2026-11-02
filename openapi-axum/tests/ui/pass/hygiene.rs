@@ -39,9 +39,9 @@ mod hygiene {
         #[status(201)]
         Created {
             #[header("Location")]
-            location: ::std::string::String,
+            location: ::openapi_axum::HeaderText,
             #[header("X-Trace")]
-            trace: ::core::option::Option<::std::string::String>,
+            trace: ::core::option::Option<::openapi_axum::HeaderText>,
             #[body]
             body: ::std::vec::Vec<T>,
         },
@@ -58,7 +58,7 @@ mod hygiene {
 
     #[::openapi_axum::route(POST, "/pets")]
     pub async fn create(Json(p): Json<Pet>) -> ::core::result::Result<Created<Pet>, ApiError> {
-        let location = ::std::string::String::new();
+        let location = ::openapi_axum::HeaderText::from_static("/pets");
         ::core::result::Result::Ok(Created::Created { location, trace: ::core::option::Option::None, body: ::std::vec![p] })
     }
 

@@ -23,10 +23,10 @@ fn invalid(kind: RejectionKind, message: String) -> Rejection {
 fn published(
     extensions: &axum::http::Extensions,
     kind: RejectionKind,
-) -> Result<Option<(std::sync::Arc<crate::spec_index::SpecIndex>, axum::http::Method, String)>, Rejection> {
+) -> Result<Option<(std::sync::Arc<crate::spec_index::SpecIndex>, crate::spec_index::OpKey)>, Rejection> {
     use crate::spec_index::Lookup;
     match Lookup::of(extensions) {
-        Lookup::Op(index, method, path) => Ok(Some((index, method, path))),
+        Lookup::Op(index, key) => Ok(Some((index, key))),
         Lookup::Unpublished => Ok(None),
         Lookup::Missing => Err(missing(kind)),
     }
@@ -70,7 +70,7 @@ impl<T: DeserializeOwned + ToSchema + 'static> ValidJson<T> {
         #[cfg(feature = "validation")]
         {
             let errors = match &published {
-                Some((index, method, path)) => match index.body(method, path, "application/json") {
+                Some((index, key)) => match index.body(&key.0, &key.1, "application/json") {
                     Some(body) => {
                         crate::spec_index::describe_errors(&body.validator, &value, |f| format!("field `{f}`"))
                     }
@@ -105,7 +105,7 @@ impl<S: Send + Sync, T: DeserializeOwned + ToSchema + 'static> FromRequest<S> fo
         let coerced = {
             let form = "application/x-www-form-urlencoded";
             let (validator, instance) = match &published {
-                Some((index, method, path)) => match index.body(method, path, form) {
+                Some((index, key)) => match index.body(&key.0, &key.1, form) {
                     Some(body) => {
                         (Some(&body.validator), crate::spec_index::coerce_object(index.root(), &body.schema, &pairs))
                     }
@@ -164,8 +164,8 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequestParts<S> for ValidQuery<T> 
         #[cfg(feature = "validation")]
         {
             let pairs: Vec<(String, String)> = serde_urlencoded::from_str(raw).unwrap_or_default();
-            if let Ok(Some((index, method, path))) = published(&parts.extensions, RejectionKind::Query)
-                && let Some(coerced) = index.coerce_query(&method, &path, &pairs)
+            if let Ok(Some((index, key))) = published(&parts.extensions, RejectionKind::Query)
+                && let Some(coerced) = index.coerce_query(&key.0, &key.1, &pairs)
                 && let Ok(v) = serde_json::from_value::<T>(coerced)
             {
                 return Ok(Self(v));
@@ -194,14 +194,14 @@ impl<S: Send + Sync> FromRequestParts<S> for ParamsGuard {
             use axum::extract::RawPathParams;
             // Not registered through `ApiRouter` (e.g. `route_undocumented`): there's
             // no published operation to validate against.
-            let Some((index, method, path)) = published(&parts.extensions, RejectionKind::Query)? else {
+            let Some((index, key)) = published(&parts.extensions, RejectionKind::Query)? else {
                 return Ok(Self);
             };
             let query: Vec<(String, String)> =
                 serde_urlencoded::from_str(parts.uri.query().unwrap_or_default()).unwrap_or_default();
             let raw = RawPathParams::from_request_parts(parts, state).await?;
             let path_params: Vec<(String, String)> = raw.iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
-            index.check_params(&method, &path, &query, &path_params).map_err(|(kind, message)| Rejection {
+            index.check_params(&key.0, &key.1, &query, &path_params).map_err(|(kind, message)| Rejection {
                 kind,
                 status: StatusCode::BAD_REQUEST,
                 message,

@@ -72,9 +72,23 @@ fn unwrap_option(ty: &Type) -> (Type, bool) {
     (ty.clone(), false)
 }
 
+/// Validate a header name at compile time (RFC 9110 token characters) and lowercase
+/// it, the form `http::HeaderName::from_static` requires.
+fn header_name(lit: &LitStr) -> syn::Result<LitStr> {
+    let value = lit.value();
+    let tchar = |c: char| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c);
+    if value.is_empty() || !value.chars().all(tchar) {
+        return Err(Error::new(lit.span(), format!("`{value}` is not a valid HTTP header name")));
+    }
+    Ok(LitStr::new(&value.to_ascii_lowercase(), lit.span()))
+}
+
 struct HeaderField {
     binding: Ident,
+    /// As written, for the docs.
     name: LitStr,
+    /// Lowercased, for `HeaderName::from_static`.
+    wire: LitStr,
     ty: Type,
     optional: bool,
 }
@@ -112,10 +126,11 @@ fn shape(fields: &Fields, code: u16) -> syn::Result<Shape> {
                     parts.push(quote!(#ident: body));
                 } else if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("header")) {
                     let name: LitStr = attr.parse_args()?;
+                    let wire = header_name(&name)?;
                     let binding = format_ident!("__h{i}");
                     let (ty, optional) = unwrap_option(&field.ty);
                     parts.push(quote!(#ident: #binding));
-                    headers.push(HeaderField { binding, name, ty, optional });
+                    headers.push(HeaderField { binding, name, wire, ty, optional });
                 } else {
                     return Err(Error::new(
                         ident.span(),
@@ -187,7 +202,7 @@ pub fn expand(item: TokenStream) -> syn::Result<TokenStream> {
             }
             for h in &c.shape.headers {
                 let ty = &h.ty;
-                let p: WherePredicate = parse_quote!(#ty: ::core::fmt::Display + #private::utoipa::ToSchema);
+                let p: WherePredicate = parse_quote!(#ty: ::openapi_axum::ResponseHeader);
                 where_clause.predicates.push(p);
             }
         }
@@ -202,11 +217,11 @@ pub fn expand(item: TokenStream) -> syn::Result<TokenStream> {
             None => quote!(#status.into_response()),
         };
         let set_headers = c.shape.headers.iter().map(|h| {
-            let (b, n) = (&h.binding, &h.name);
+            let (b, n) = (&h.binding, &h.wire);
             if h.optional {
-                quote!(if let ::core::option::Option::Some(v) = &#b { #private::set_header(&mut res, #n, v); })
+                quote!(if let ::core::option::Option::Some(v) = &#b { #private::insert_header(&mut res, #n, v); })
             } else {
-                quote!(#private::set_header(&mut res, #n, &#b);)
+                quote!(#private::insert_header(&mut res, #n, &#b);)
             }
         });
         quote!(#pattern => {
@@ -229,7 +244,7 @@ pub fn expand(item: TokenStream) -> syn::Result<TokenStream> {
         };
         let headers = c.shape.headers.iter().map(|h| {
             let (n, ty) = (&h.name, &h.ty);
-            quote!((#n, ctx.schema::<#ty>()))
+            quote!((#n, <#ty as ::openapi_axum::ResponseHeader>::schema()))
         });
         let hint_types: Vec<&Type> = c.shape.body.iter().collect();
         let hints = register_hints(&hint_types);
