@@ -49,7 +49,22 @@ impl<S: Send + Sync, T: DeserializeOwned + ToSchema + 'static> FromRequest<S> fo
     type Rejection = Rejection;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        // Without validation there's nothing to check: deserialize directly, as axum does.
+        #[cfg(not(feature = "validation"))]
+        {
+            let axum::Json(v) = axum::Json::<T>::from_request(req, state).await?;
+            Ok(ValidJson(v))
+        }
         #[cfg(feature = "validation")]
+        {
+            Self::validated(req, state).await
+        }
+    }
+}
+
+impl<T: DeserializeOwned + ToSchema + 'static> ValidJson<T> {
+    #[cfg(feature = "validation")]
+    async fn validated<S: Send + Sync>(req: Request, state: &S) -> Result<Self, Rejection> {
         let published = published(req.extensions(), RejectionKind::Json)?;
         let axum::Json(value) = axum::Json::<serde_json::Value>::from_request(req, state).await?;
         #[cfg(feature = "validation")]

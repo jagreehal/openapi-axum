@@ -3,7 +3,7 @@ resolver = "3"
 members = ["openapi-axum", "openapi-axum-macros"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Jag Reehal"]
@@ -12,7 +12,7 @@ repository = "https://github.com/jagreehal/openapi-axum"
 homepage = "https://github.com/jagreehal/openapi-axum"
 
 [workspace.dependencies]
-openapi-axum-macros = { path = "openapi-axum-macros", version = "0.1.0" }
+openapi-axum-macros = { path = "openapi-axum-macros", version = "0.1.1" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

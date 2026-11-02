@@ -166,7 +166,7 @@ async fn conforms_to_its_docs() {
 }
 ```
 
-The test fails when the docs leave out something a request needs, such as a header your auth extractor reads. It also fails on any undocumented response. For real credentials, use `Conformance::new(&router, &openapi).credential("bearer", token)`.
+It sends one generated request per operation, so treat it as a smoke test, not full contract verification. It catches an undocumented requirement when that requirement makes the generated request fail with a 400, 401, 403, 415 or 422, or with a status the docs don't list. It misses one that fails with some other status the operation documents, such as a `404`. It also fails on undocumented responses. For real credentials, use `Conformance::new(&router, &openapi).credential("bearer", token)`.
 
 ## Checking responses at runtime
 
@@ -223,6 +223,10 @@ To catch breaking changes between releases, commit your generated document and r
 - `.split()` returns the `axum::Router` and the `OpenApi`.
 
 Handlers stay ordinary async functions, so a unit test can call `get_todo(State(s), Path(1))` without a router.
+
+## Cost
+
+Request validation adds about 1 µs to a small JSON request and about 7 µs to a 1 KB nested one on an M1 Pro. `verify_responses` adds about 1.6 µs and 11 µs more. [BENCHMARKS.md](BENCHMARKS.md) has the method, allocation counts and how to run them yourself.
 
 ## Features
 

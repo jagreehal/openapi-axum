@@ -52,6 +52,10 @@ utoipa = { version = "6", features = ["uuid"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 trybuild = "1"
 futures-util = { version = "0.3", default-features = false }
+criterion = { version = "0.8", features = ["async_tokio"] }
+dhat = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 jsonschema = { version = "0.60", default-features = false }
 
 [lints]
@@ -72,3 +76,15 @@ required-features = ["validation", "testing"]
 [[test]]
 name = "serde_compat"
 required-features = ["validation", "testing"]
+
+[[test]]
+name = "observability"
+required-features = ["validation", "tracing"]
+
+[[bench]]
+name = "overhead"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false

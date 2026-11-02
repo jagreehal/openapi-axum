@@ -933,3 +933,83 @@ async fn body_limit_applies_in_either_builder_order() {
         assert!(matches!(res, Ok(StatusCode::OK)), "order {order}: the 1024-byte limit was not applied");
     }
 }
+
+// ---------- HeaderText: header validity checked at construction ----------
+
+#[derive(ApiResponse)]
+enum Moved {
+    /// See the new location.
+    #[status(303)]
+    SeeOther {
+        #[header("Location")]
+        location: openapi_axum::HeaderText,
+    },
+}
+
+#[route(GET, "/moved/{to}")]
+async fn moved(Path(to): Path<String>) -> Result<Moved, ApiError> {
+    // The invalid case is the handler's documented error, not a surprise 500.
+    let location = openapi_axum::HeaderText::new(format!("/{to}"))
+        .map_err(|e| ApiError::BadRequest(Problem { message: e.to_string() }))?;
+    Ok(Moved::SeeOther { location })
+}
+
+#[tokio::test]
+async fn header_text_is_validated_where_it_is_built() {
+    let (router, openapi) = ApiRouter::new().routes(routes![moved]).verify_responses(VerifyMode::Panic).split();
+    let res = router.clone().oneshot(get("/moved/new")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/new");
+    // `%0A` decodes to a newline in the path: HeaderText refuses it, the handler maps
+    // that to its documented 400, and verify_responses sees a documented response.
+    let res = router.oneshot(get("/moved/a%0Ab")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let spec = serde_json::to_value(&openapi).unwrap();
+    assert_eq!(
+        spec["paths"]["/moved/{to}"]["get"]["responses"]["303"]["headers"]["Location"]["schema"]["type"],
+        "string"
+    );
+}
+
+// ---------- axum's DefaultBodyLimit still applies, as a documented error ----------
+
+#[derive(ApiResponse)]
+enum SizedError {
+    /// Invalid input.
+    #[status(400)]
+    BadRequest(Problem),
+    /// Body over the configured limit.
+    #[status(413)]
+    TooLarge(Problem),
+}
+
+impl From<Rejection> for SizedError {
+    fn from(r: Rejection) -> Self {
+        let problem = Problem { message: r.message };
+        if r.status == StatusCode::PAYLOAD_TOO_LARGE { Self::TooLarge(problem) } else { Self::BadRequest(problem) }
+    }
+}
+
+#[route(POST, "/limited")]
+async fn limited(Json(p): Json<Input>) -> Result<Json<u32>, SizedError> {
+    Ok(Json(p.value))
+}
+
+#[tokio::test]
+async fn default_body_limit_applies_before_validation() {
+    let router = ApiRouter::new()
+        .routes(routes![limited])
+        .layer(axum::extract::DefaultBodyLimit::max(16))
+        .verify_responses(VerifyMode::Panic)
+        .split()
+        .0;
+    let post = |body: String| {
+        Request::post("/limited").header("content-type", "application/json").body(Body::from(body)).unwrap()
+    };
+    // Over the limit: axum's 413 reaches the error type as `Rejection { status: 413 }`.
+    let res = router.clone().oneshot(post(format!(r#"{{"value":{}}}"#, "1".repeat(32)))).await.unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    // Under the limit: validated and handled as usual.
+    let res = router.oneshot(post(r#"{"value":7}"#.into())).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
