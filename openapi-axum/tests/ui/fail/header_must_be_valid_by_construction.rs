@@ -23,7 +23,8 @@ impl From<Rejection> for ApiError {
 #[derive(ApiResponse)]
 enum Bad {
     #[status(201)]
-    Created { #[header("Location")] location: Pet, #[body] pet: Pet },
+    // A String could hold a newline: only valid-by-construction types are allowed.
+    Created { #[header("Location")] location: String, #[body] pet: Pet },
 }
 
 fn main() {}

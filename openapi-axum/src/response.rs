@@ -92,9 +92,9 @@ impl<T: ApiResponse, E: ApiResponse> ApiResponse for Result<T, E> {
     }
 }
 
-/// A response header value checked when you construct it. In a `#[header]` field it
-/// can't fail at send time, unlike a `String` or other `Display` value: an invalid
-/// header (a newline, say) is an error *you* handle, not an undocumented `500`.
+/// A response header value, checked when you construct it. `#[header]` fields hold
+/// one (or another [`ResponseHeader`]), so an invalid header (a newline, say) is an
+/// error your handler handles where it builds the value, never a failure at send time.
 ///
 /// ```
 /// use openapi_axum::HeaderText;
@@ -174,5 +174,36 @@ impl utoipa::PartialSchema for HeaderText {
 impl ToSchema for HeaderText {
     fn name() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("HeaderText")
+    }
+}
+
+/// A type a `#[derive(ApiResponse)]` `#[header("...")]` field can hold.
+///
+/// The conversion is infallible: a value of this type is a valid header value by
+/// construction, so sending the header can't fail at response time. Implemented for
+/// [`HeaderText`] and `http::HeaderValue`. Implement it for your own types (an `ETag`
+/// newtype, say) by converting from a value you've already validated.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` can't be a response header",
+    label = "`#[header]` fields need a type that is a valid header value by construction",
+    note = "use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static(\"...\")`), `http::HeaderValue`, or implement `openapi_axum::ResponseHeader`"
+)]
+pub trait ResponseHeader {
+    fn to_header_value(&self) -> axum::http::HeaderValue;
+    /// The schema documented for this header.
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        <HeaderText as utoipa::PartialSchema>::schema()
+    }
+}
+
+impl ResponseHeader for HeaderText {
+    fn to_header_value(&self) -> axum::http::HeaderValue {
+        self.0.clone()
+    }
+}
+
+impl ResponseHeader for axum::http::HeaderValue {
+    fn to_header_value(&self) -> axum::http::HeaderValue {
+        self.clone()
     }
 }

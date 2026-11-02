@@ -1,0 +1,14 @@
+error[E0277]: `std::string::String` can't be a response header
+  --> tests/ui/fail/header_must_be_valid_by_construction.rs:23:10
+   |
+23 | #[derive(ApiResponse)]
+   |          ^^^^^^^^^^^ `#[header]` fields need a type that is a valid header value by construction
+   |
+   = help: the trait `ResponseHeader` is not implemented for `std::string::String`
+   = note: use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static("...")`), `http::HeaderValue`, or implement `openapi_axum::ResponseHeader`
+help: the trait `ResponseHeader` is implemented for `HeaderText`
+  --> src/response.rs
+   |
+   | impl ResponseHeader for HeaderText {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the derive macro `ApiResponse` (in Nightly builds, run with -Z macro-backtrace for more info)

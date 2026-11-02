@@ -88,3 +88,7 @@ harness = false
 [[bench]]
 name = "allocations"
 harness = false
+
+[[bench]]
+name = "breakdown"
+harness = false

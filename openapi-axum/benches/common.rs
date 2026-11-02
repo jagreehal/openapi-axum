@@ -90,6 +90,29 @@ async fn nested(Json(b): Json<Nested>) -> Result<Json<Nested>, ApiError> {
     Ok(Json(b))
 }
 
+fn title_ok(t: &str) -> bool {
+    (1..=200).contains(&t.chars().count())
+}
+
+/// The same constraints the schemas declare, checked by hand after typed
+/// deserialization: about the cheapest way to enforce them.
+async fn checked_small(Json(b): Json<Small>) -> Result<Json<Small>, axum::http::StatusCode> {
+    if title_ok(&b.title) { Ok(Json(b)) } else { Err(axum::http::StatusCode::BAD_REQUEST) }
+}
+
+async fn checked_nested(Json(b): Json<Nested>) -> Result<Json<Nested>, axum::http::StatusCode> {
+    let ok = !b.owner.name.is_empty() && b.items.len() <= 100 && b.items.iter().all(|i| title_ok(&i.title));
+    if ok { Ok(Json(b)) } else { Err(axum::http::StatusCode::BAD_REQUEST) }
+}
+
+/// Plain axum with hand-written checks for the same constraints: a like-for-like
+/// baseline for request validation.
+pub fn handwritten() -> axum::Router {
+    axum::Router::new()
+        .route("/small", axum::routing::post(checked_small))
+        .route("/nested", axum::routing::post(checked_nested))
+}
+
 /// Plain axum: the baseline.
 pub fn plain() -> axum::Router {
     axum::Router::new()
@@ -111,7 +134,7 @@ pub fn openapi_verified() -> axum::Router {
 
 /// The configurations available in this build, labelled.
 pub fn configurations() -> Vec<(&'static str, axum::Router)> {
-    let mut configs = vec![("plain_axum", plain())];
+    let mut configs = vec![("plain_axum", plain()), ("handwritten_checks", handwritten())];
     if cfg!(feature = "validation") {
         configs.push(("request_validation", openapi()));
         #[cfg(feature = "validation")]

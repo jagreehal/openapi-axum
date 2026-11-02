@@ -1,0 +1,5 @@
+error: `Bad Name` is not a valid HTTP header name
+ --> tests/ui/fail/invalid_header_name.rs:9:18
+  |
+9 |         #[header("Bad Name")]
+  |                  ^^^^^^^^^^

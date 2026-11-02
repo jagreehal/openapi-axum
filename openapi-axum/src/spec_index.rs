@@ -53,14 +53,18 @@ impl Violation {
 pub struct SpecIndex {
     root: Value,
     ops: HashMap<(Method, String), OperationSpec>,
-    /// Route id (set per route by `ApiRouter`) -> documented (method, path).
-    routes: HashMap<u64, (Method, String)>,
+    /// Route id (set per route by `ApiRouter`) -> its documented operation, resolved
+    /// once at build time (`None`: registered, but missing from the document).
+    routes: HashMap<u64, Option<OpKey>>,
 }
+
+/// A documented (method, path), shared so per-request lookups clone a pointer, not strings.
+pub(crate) type OpKey = std::sync::Arc<(Method, String)>;
 
 /// What the index knows about the operation a request was routed to.
 pub(crate) enum Lookup {
     /// A documented operation.
-    Op(std::sync::Arc<SpecIndex>, Method, String),
+    Op(std::sync::Arc<SpecIndex>, OpKey),
     /// A route `ApiRouter` registered whose operation is missing from the published
     /// document (e.g. removed with `map_openapi`). Validation fails closed.
     Missing,
@@ -78,9 +82,7 @@ impl Lookup {
             return Self::Unpublished;
         };
         match index.routes.get(id) {
-            Some((method, path)) if index.ops.contains_key(&(method.clone(), path.clone())) => {
-                Self::Op(index.clone(), method.clone(), path.clone())
-            }
+            Some(Some(key)) => Self::Op(index.clone(), key.clone()),
             _ => Self::Missing,
         }
     }
@@ -228,6 +230,11 @@ pub(crate) fn describe_errors(
     instance: &Value,
     label: impl Fn(&str) -> String,
 ) -> Vec<String> {
+    // Valid input is the common case: `is_valid` is several times cheaper than
+    // collecting errors, so only build messages when there are some.
+    if validator.is_valid(instance) {
+        return Vec::new();
+    }
     validator
         .iter_errors(instance)
         .map(|e| {
@@ -241,6 +248,9 @@ pub(crate) fn describe_errors(
 /// Like [`describe_errors`], without the offending values: only where the value is
 /// and which keyword it failed. For logs, where a value may be user data.
 pub(crate) fn describe_errors_redacted(validator: &jsonschema::Validator, instance: &Value) -> Vec<String> {
+    if validator.is_valid(instance) {
+        return Vec::new();
+    }
     validator
         .iter_errors(instance)
         .map(|e| {
@@ -266,7 +276,13 @@ impl SpecIndex {
                 ops.insert((method, path.clone()), Self::operation(&root, op));
             }
         }
-        let routes = routes.iter().map(|(id, m, p)| (*id, (m.clone(), p.clone()))).collect();
+        let routes = routes
+            .iter()
+            .map(|(id, m, p)| {
+                let key = (m.clone(), p.clone());
+                (*id, ops.contains_key(&key).then(|| std::sync::Arc::new(key)))
+            })
+            .collect();
         Self { root, ops, routes }
     }
 
@@ -320,20 +336,19 @@ impl SpecIndex {
     }
 
     /// The documented operation registered under route `id`, if it's in the document.
-    pub(crate) fn route(&self, id: u64) -> Option<(Method, String)> {
-        let (method, path) = self.routes.get(&id)?;
-        self.ops.contains_key(&(method.clone(), path.clone())).then(|| (method.clone(), path.clone()))
+    pub(crate) fn route(&self, id: u64) -> Option<OpKey> {
+        self.routes.get(&id)?.clone()
     }
 
     /// The operation for a matched path: exact, or the one documented path it ends
     /// with (when the router is nested under a prefix it doesn't know about).
-    pub(crate) fn by_matched_path(&self, method: &Method, matched: &str) -> Option<(Method, String)> {
+    pub(crate) fn by_matched_path(&self, method: &Method, matched: &str) -> Option<OpKey> {
         if self.op(method, matched).is_some() {
-            return Some((method.clone(), matched.to_owned()));
+            return Some(std::sync::Arc::new((method.clone(), matched.to_owned())));
         }
         let mut hits = self.ops.keys().filter(|(m, p)| m == method && matched.ends_with(p.as_str()));
         match (hits.next(), hits.next()) {
-            (Some((m, p)), None) => Some((m.clone(), p.clone())),
+            (Some(key), None) => Some(std::sync::Arc::new(key.clone())),
             _ => None,
         }
     }

@@ -84,7 +84,7 @@ mod validation;
 pub use doc::{DocCtx, ExtractorDoc, PathValue};
 pub use openapi_axum_macros::{ApiResponse, route};
 pub use rejection::{Rejection, RejectionKind};
-pub use response::{Accepted, ApiResponse, Created, HeaderText, InvalidHeaderText, NoContent};
+pub use response::{Accepted, ApiResponse, Created, HeaderText, InvalidHeaderText, NoContent, ResponseHeader};
 pub use router::{ApiRouter, DEFAULT_VERIFY_BODY_LIMIT, RouteDef, VerifyMode};
 
 /// Collect `#[route]` handlers for [`ApiRouter::routes`]: `routes![get_todo, todos::create_todo]`.
@@ -102,15 +102,10 @@ pub mod __private {
     };
     pub use crate::validation::{ParamsGuard, ValidForm, ValidJson, ValidQuery};
 
-    /// Set a response header from a typed field; an invalid value becomes a 500
-    /// rather than silently dropping a documented header.
-    pub fn set_header(res: &mut axum::response::Response, name: &'static str, value: &impl std::fmt::Display) {
-        match axum::http::HeaderValue::try_from(value.to_string()) {
-            Ok(v) => {
-                res.headers_mut().insert(name, v);
-            }
-            Err(_) => *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        }
+    /// Insert a typed `#[header]` field. `ResponseHeader` values are valid by
+    /// construction, so this can't fail.
+    pub fn insert_header(res: &mut axum::response::Response, name: &'static str, value: &impl crate::ResponseHeader) {
+        res.headers_mut().insert(axum::http::HeaderName::from_static(name), value.to_header_value());
     }
     pub use crate::rejection::{FromRejection, reject};
     pub use crate::router::Route;
