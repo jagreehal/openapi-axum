@@ -903,3 +903,33 @@ async fn status_and_content_type_are_checked_without_buffering() {
         assert!(err.contains("content-type `application/xml` is not documented"), "{kind}: {err}");
     }
 }
+
+#[tokio::test]
+async fn body_limit_applies_in_either_builder_order() {
+    // Limit 1024 < the 4 KiB invalid body, so it must pass through unchecked. With the
+    // default 1 MiB it would be checked and panic: passing proves the limit applied.
+    let builders: [fn() -> axum::Router; 2] = [
+        || {
+            ApiRouter::new()
+                .routes(routes![ok])
+                .layer(axum::middleware::from_fn(rewrite_body))
+                .verify_body_limit(1024)
+                .verify_responses(VerifyMode::Panic)
+                .split()
+                .0
+        },
+        || {
+            ApiRouter::new()
+                .routes(routes![ok])
+                .layer(axum::middleware::from_fn(rewrite_body))
+                .verify_responses(VerifyMode::Panic)
+                .verify_body_limit(1024)
+                .split()
+                .0
+        },
+    ];
+    for (order, build) in builders.into_iter().enumerate() {
+        let res = tokio::spawn(async move { build().oneshot(rewritten("large", None)).await.unwrap().status() }).await;
+        assert!(matches!(res, Ok(StatusCode::OK)), "order {order}: the 1024-byte limit was not applied");
+    }
+}

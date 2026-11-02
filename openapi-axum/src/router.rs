@@ -71,7 +71,9 @@ pub struct ApiRouter<S = ()> {
     openapi: OpenApi,
     registered: BTreeSet<(String, String)>,
     spec_routes: Vec<String>,
-    verify: Option<(VerifyMode, usize)>,
+    verify: Option<VerifyMode>,
+    /// Kept apart from `verify` so `verify_body_limit` works in either call order.
+    verify_limit: Option<usize>,
     /// (route id, method, documented path): `nest` re-prefixes, `merge` combines.
     route_keys: Vec<(u64, Method, String)>,
 }
@@ -157,6 +159,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             registered: BTreeSet::new(),
             spec_routes: Vec::new(),
             verify: None,
+            verify_limit: None,
             route_keys: Vec::new(),
         }
     }
@@ -250,6 +253,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.openapi.merge(other.openapi);
         self.spec_routes.extend(other.spec_routes);
         self.verify = self.verify.or(other.verify);
+        self.verify_limit = self.verify_limit.or(other.verify_limit);
         self.route_keys.extend(other.route_keys);
         self
     }
@@ -278,6 +282,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.openapi.merge(other.openapi);
         self.spec_routes.extend(other.spec_routes.iter().map(|p| nested_path(prefix, p)));
         self.verify = self.verify.or(other.verify);
+        self.verify_limit = self.verify_limit.or(other.verify_limit);
         self.route_keys.extend(other.route_keys.iter().map(|(id, m, p)| (*id, m.clone(), nested_path(prefix, p))));
         self.router = self.router.nest(prefix, other.router);
         self
@@ -311,6 +316,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             registered: self.registered,
             spec_routes: self.spec_routes,
             verify: self.verify,
+            verify_limit: self.verify_limit,
             route_keys: self.route_keys,
         }
     }
@@ -341,16 +347,16 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
     #[cfg(feature = "validation")]
     #[must_use]
     pub fn verify_responses(mut self, mode: VerifyMode) -> Self {
-        let limit = self.verify.map_or(DEFAULT_VERIFY_BODY_LIMIT, |(_, l)| l);
-        self.verify = Some((mode, limit));
+        self.verify = Some(mode);
         self
     }
 
     /// Largest response body (bytes) `verify_responses` buffers to check its schema.
+    /// Call it before or after `verify_responses`; it does nothing without it.
     #[cfg(feature = "validation")]
     #[must_use]
     pub fn verify_body_limit(mut self, bytes: usize) -> Self {
-        self.verify = self.verify.map(|(mode, _)| (mode, bytes));
+        self.verify_limit = Some(bytes);
         self
     }
 
@@ -399,7 +405,8 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         #[cfg(feature = "validation")]
         {
             let index = std::sync::Arc::new(crate::spec_index::SpecIndex::with_routes(&self.openapi, &self.route_keys));
-            if let Some((mode, limit)) = self.verify {
+            if let Some(mode) = self.verify {
+                let limit = self.verify_limit.unwrap_or(DEFAULT_VERIFY_BODY_LIMIT);
                 router = router.layer(axum::middleware::from_fn_with_state((index.clone(), mode, limit), verify));
             }
             // Lets `ParamsGuard` validate params against the published document.
