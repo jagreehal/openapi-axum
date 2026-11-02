@@ -39,6 +39,37 @@ struct OperationSpec {
 pub struct SpecIndex {
     root: Value,
     ops: HashMap<(Method, String), OperationSpec>,
+    /// Route id (set per route by `ApiRouter`) -> documented (method, path).
+    routes: HashMap<u64, (Method, String)>,
+}
+
+/// What the index knows about the operation a request was routed to.
+pub(crate) enum Lookup {
+    /// A documented operation.
+    Op(std::sync::Arc<SpecIndex>, Method, String),
+    /// A route `ApiRouter` registered whose operation is missing from the published
+    /// document (e.g. removed with `map_openapi`). Validation fails closed.
+    Missing,
+    /// No published document applies (undocumented route, or not built by `ApiRouter`).
+    Unpublished,
+}
+
+impl Lookup {
+    /// Look up by the route id `ApiRouter` attached to the route, never by the
+    /// request's matched path: that changes when the router is nested inside another
+    /// `axum::Router`, and a mismatch must not switch validation off.
+    pub(crate) fn of(extensions: &axum::http::Extensions) -> Self {
+        let Some(index) = extensions.get::<std::sync::Arc<SpecIndex>>() else { return Self::Unpublished };
+        let Some(crate::router::RouteId(id)) = extensions.get::<crate::router::RouteId>() else {
+            return Self::Unpublished;
+        };
+        match index.routes.get(id) {
+            Some((method, path)) if index.ops.contains_key(&(method.clone(), path.clone())) => {
+                Self::Op(index.clone(), method.clone(), path.clone())
+            }
+            _ => Self::Missing,
+        }
+    }
 }
 
 fn resolve<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
@@ -193,8 +224,26 @@ pub(crate) fn describe_errors(
         .collect()
 }
 
+/// Like [`describe_errors`], without the offending values: only where the value is
+/// and which keyword it failed. For logs, where a value may be user data.
+pub(crate) fn describe_errors_redacted(validator: &jsonschema::Validator, instance: &Value) -> Vec<String> {
+    validator
+        .iter_errors(instance)
+        .map(|e| {
+            let at = e.instance_path().to_string();
+            let keyword = e.schema_path().to_string().rsplit('/').next().unwrap_or_default().to_owned();
+            format!("`{}` fails `{keyword}`", if at.is_empty() { "/" } else { at.as_str() })
+        })
+        .collect()
+}
+
 impl SpecIndex {
+    #[cfg_attr(not(feature = "testing"), allow(dead_code))]
     pub fn new(openapi: &utoipa::openapi::OpenApi) -> Self {
+        Self::with_routes(openapi, &[])
+    }
+
+    pub(crate) fn with_routes(openapi: &utoipa::openapi::OpenApi, routes: &[(u64, Method, String)]) -> Self {
         let root = serde_json::to_value(openapi).expect("OpenAPI serializes");
         let mut ops = HashMap::new();
         for (path, item) in root["paths"].as_object().into_iter().flatten() {
@@ -203,7 +252,8 @@ impl SpecIndex {
                 ops.insert((method, path.clone()), Self::operation(&root, op));
             }
         }
-        Self { root, ops }
+        let routes = routes.iter().map(|(id, m, p)| (*id, (m.clone(), p.clone()))).collect();
+        Self { root, ops, routes }
     }
 
     fn operation(root: &Value, op: &Value) -> OperationSpec {
@@ -253,6 +303,25 @@ impl SpecIndex {
             responses.insert(status.clone(), ResponseSpec { content });
         }
         OperationSpec { params, bodies, responses }
+    }
+
+    /// The documented operation registered under route `id`, if it's in the document.
+    pub(crate) fn route(&self, id: u64) -> Option<(Method, String)> {
+        let (method, path) = self.routes.get(&id)?;
+        self.ops.contains_key(&(method.clone(), path.clone())).then(|| (method.clone(), path.clone()))
+    }
+
+    /// The operation for a matched path: exact, or the one documented path it ends
+    /// with (when the router is nested under a prefix it doesn't know about).
+    pub(crate) fn by_matched_path(&self, method: &Method, matched: &str) -> Option<(Method, String)> {
+        if self.op(method, matched).is_some() {
+            return Some((method.clone(), matched.to_owned()));
+        }
+        let mut hits = self.ops.keys().filter(|(m, p)| m == method && matched.ends_with(p.as_str()));
+        match (hits.next(), hits.next()) {
+            (Some((m, p)), None) => Some((m.clone(), p.clone())),
+            _ => None,
+        }
     }
 
     fn op(&self, method: &Method, path: &str) -> Option<&OperationSpec> {
@@ -317,6 +386,7 @@ impl SpecIndex {
 
     /// Check a response against the documented responses of its operation.
     /// `Ok(())` for routes that aren't documented (e.g. `route_undocumented`).
+    #[cfg_attr(not(feature = "testing"), allow(dead_code))]
     pub fn check_response(
         &self,
         method: &Method,
@@ -324,6 +394,21 @@ impl SpecIndex {
         status: StatusCode,
         content_type: Option<&str>,
         body: &[u8],
+    ) -> Result<(), String> {
+        self.check_response_with(method, path, status, content_type, Some(body), false)
+    }
+
+    /// [`check_response`](Self::check_response). `body: None` checks only status and
+    /// content type (the body wasn't buffered). With `redact`, messages name where a
+    /// body fails and which keyword, but never include body values (for logs).
+    pub(crate) fn check_response_with(
+        &self,
+        method: &Method,
+        path: &str,
+        status: StatusCode,
+        content_type: Option<&str>,
+        body: Option<&[u8]>,
+        redact: bool,
     ) -> Result<(), String> {
         let Some(op) = self.op(method, path) else { return Ok(()) };
         let label = format!("{method} {path} -> {status}");
@@ -334,6 +419,17 @@ impl SpecIndex {
             .or_else(|| op.responses.get(&class))
             .or_else(|| op.responses.get("default"))
             .ok_or_else(|| format!("{label}: status is not documented"))?;
+        let is_documented = |ct: &str| documented.content.iter().any(|(doc_ct, _)| essence(doc_ct) == essence(ct));
+        // Body not buffered (streamed or over the limit): status and content type only.
+        let Some(body) = body else {
+            return match content_type {
+                Some(ct) if documented.content.is_empty() => {
+                    Err(format!("{label}: content-type `{ct}` returned but no body is documented"))
+                }
+                Some(ct) if !is_documented(ct) => Err(format!("{label}: content-type `{ct}` is not documented")),
+                _ => Ok(()),
+            };
+        };
         // No body and no content type: nothing was sent. An empty body *with* a content
         // type (e.g. `String::new()` as text/plain) is a value, validated below.
         if body.is_empty() && content_type.is_none() {
@@ -356,11 +452,21 @@ impl SpecIndex {
             .find(|(doc_ct, _)| essence(doc_ct) == essence(ct))
             .ok_or_else(|| format!("{label}: content-type `{ct}` is not documented"))?;
         let instance: Value = if essence(ct).ends_with("json") {
-            serde_json::from_slice(body).map_err(|e| format!("{label}: body is not valid JSON: {e}"))?
+            serde_json::from_slice(body).map_err(|e| {
+                if redact {
+                    format!("{label}: body is not valid JSON")
+                } else {
+                    format!("{label}: body is not valid JSON: {e}")
+                }
+            })?
         } else {
             Value::String(String::from_utf8_lossy(body).into_owned())
         };
-        let errors = describe_errors(validator, &instance, |f| format!("field `{f}`"));
+        let errors = if redact {
+            describe_errors_redacted(validator, &instance)
+        } else {
+            describe_errors(validator, &instance, |f| format!("field `{f}`"))
+        };
         if errors.is_empty() {
             Ok(())
         } else {
@@ -373,6 +479,31 @@ impl SpecIndex {
 mod tests {
     use super::{ArrayStyle, array_style, coerce_styled};
     use serde_json::json;
+
+    #[test]
+    fn redacted_response_messages_leave_out_values() {
+        let openapi: utoipa::openapi::OpenApi = serde_json::from_value(json!({
+            "openapi": "3.1.0",
+            "info": { "title": "t", "version": "1" },
+            "paths": { "/me": { "get": { "responses": { "200": { "description": "ok", "content": {
+                "application/json": { "schema": { "type": "object", "properties": { "age": { "type": "integer" } } } }
+            } } } } } }
+        }))
+        .unwrap();
+        let index = super::SpecIndex::new(&openapi);
+        let body = br#"{"age":"alice@corp.example"}"#;
+        let get = axum::http::Method::GET;
+        let ok = axum::http::StatusCode::OK;
+        let full = index.check_response_with(&get, "/me", ok, Some("application/json"), Some(body), false).unwrap_err();
+        let redacted =
+            index.check_response_with(&get, "/me", ok, Some("application/json"), Some(body), true).unwrap_err();
+        assert!(full.contains("alice@corp.example"), "tests keep full detail: {full}");
+        assert!(!redacted.contains("alice"), "logs never carry values: {redacted}");
+        assert!(redacted.contains("`/age` fails `type`"), "{redacted}");
+        let bad_json =
+            index.check_response_with(&get, "/me", ok, Some("application/json"), Some(b"{secret"), true).unwrap_err();
+        assert!(!bad_json.contains("secret"), "{bad_json}");
+    }
 
     #[test]
     fn array_style_follows_openapi_defaults() {

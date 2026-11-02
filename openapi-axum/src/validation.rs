@@ -15,14 +15,30 @@ fn invalid(kind: RejectionKind, message: String) -> Rejection {
     Rejection { kind, status: StatusCode::UNPROCESSABLE_ENTITY, message }
 }
 
-/// The published document for this request's operation, when the router came from
-/// `ApiRouter::split`. Bodies are validated against *that* (so `map_openapi` edits are
-/// enforced too); handlers mounted some other way fall back to `T`'s own schema.
+/// The published operation for this request. Bodies are validated against *that*
+/// (so `map_openapi` edits are enforced too); handlers not registered through
+/// `ApiRouter` fall back to `T`'s own schema. A registered route whose operation is
+/// missing from the document fails closed.
 #[cfg(feature = "validation")]
-fn published(req: &Request) -> Option<(std::sync::Arc<crate::spec_index::SpecIndex>, axum::http::Method, String)> {
-    let index = req.extensions().get::<std::sync::Arc<crate::spec_index::SpecIndex>>()?.clone();
-    let path = req.extensions().get::<axum::extract::MatchedPath>()?.as_str().to_owned();
-    Some((index, req.method().clone(), path))
+fn published(
+    extensions: &axum::http::Extensions,
+    kind: RejectionKind,
+) -> Result<Option<(std::sync::Arc<crate::spec_index::SpecIndex>, axum::http::Method, String)>, Rejection> {
+    use crate::spec_index::Lookup;
+    match Lookup::of(extensions) {
+        Lookup::Op(index, method, path) => Ok(Some((index, method, path))),
+        Lookup::Unpublished => Ok(None),
+        Lookup::Missing => Err(missing(kind)),
+    }
+}
+
+#[cfg(feature = "validation")]
+fn missing(kind: RejectionKind) -> Rejection {
+    Rejection {
+        kind,
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "this route has no operation in the published OpenAPI document".into(),
+    }
 }
 
 /// The extractor `#[route]` uses for `Json<T>` arguments. Hands your handler an `axum::Json<T>`.
@@ -34,7 +50,7 @@ impl<S: Send + Sync, T: DeserializeOwned + ToSchema + 'static> FromRequest<S> fo
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         #[cfg(feature = "validation")]
-        let published = published(&req);
+        let published = published(req.extensions(), RejectionKind::Json)?;
         let axum::Json(value) = axum::Json::<serde_json::Value>::from_request(req, state).await?;
         #[cfg(feature = "validation")]
         {
@@ -68,7 +84,7 @@ impl<S: Send + Sync, T: DeserializeOwned + ToSchema + 'static> FromRequest<S> fo
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         #[cfg(feature = "validation")]
-        let published = published(&req);
+        let published = published(req.extensions(), RejectionKind::Form)?;
         let axum::Form(pairs) = axum::Form::<Vec<(String, String)>>::from_request(req, state).await?;
         #[cfg(feature = "validation")]
         let coerced = {
@@ -132,12 +148,9 @@ impl<S: Send + Sync, T: DeserializeOwned> FromRequestParts<S> for ValidQuery<T> 
         };
         #[cfg(feature = "validation")]
         {
-            use axum::extract::MatchedPath;
-            let index = parts.extensions.get::<std::sync::Arc<crate::spec_index::SpecIndex>>();
-            let path = parts.extensions.get::<MatchedPath>().map(MatchedPath::as_str);
             let pairs: Vec<(String, String)> = serde_urlencoded::from_str(raw).unwrap_or_default();
-            if let (Some(index), Some(path)) = (index, path)
-                && let Some(coerced) = index.coerce_query(&parts.method, path, &pairs)
+            if let Ok(Some((index, method, path))) = published(&parts.extensions, RejectionKind::Query)
+                && let Some(coerced) = index.coerce_query(&method, &path, &pairs)
                 && let Ok(v) = serde_json::from_value::<T>(coerced)
             {
                 return Ok(Self(v));
@@ -163,20 +176,17 @@ impl<S: Send + Sync> FromRequestParts<S> for ParamsGuard {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         #[cfg(feature = "validation")]
         {
-            use axum::extract::{MatchedPath, RawPathParams};
-            // Present when the router came from `ApiRouter::split`; a handler mounted
-            // some other way is not validated (there's no published document to use).
-            let Some(index) = parts.extensions.get::<std::sync::Arc<crate::spec_index::SpecIndex>>().cloned() else {
-                return Ok(Self);
-            };
-            let Some(path) = parts.extensions.get::<MatchedPath>().map(|p| p.as_str().to_owned()) else {
+            use axum::extract::RawPathParams;
+            // Not registered through `ApiRouter` (e.g. `route_undocumented`): there's
+            // no published operation to validate against.
+            let Some((index, method, path)) = published(&parts.extensions, RejectionKind::Query)? else {
                 return Ok(Self);
             };
             let query: Vec<(String, String)> =
                 serde_urlencoded::from_str(parts.uri.query().unwrap_or_default()).unwrap_or_default();
             let raw = RawPathParams::from_request_parts(parts, state).await?;
             let path_params: Vec<(String, String)> = raw.iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
-            index.check_params(&parts.method, &path, &query, &path_params).map_err(|(kind, message)| Rejection {
+            index.check_params(&method, &path, &query, &path_params).map_err(|(kind, message)| Rejection {
                 kind,
                 status: StatusCode::BAD_REQUEST,
                 message,

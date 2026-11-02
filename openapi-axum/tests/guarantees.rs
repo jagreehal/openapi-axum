@@ -738,3 +738,168 @@ async fn conformance_with_unique_enum_arrays() {
     assert!(msg.contains("couldn't generate a valid value for query parameter `dirs`"), "{msg}");
     assert!(msg.contains("add an `example`"), "{msg}");
 }
+
+// ---------- security review: lookups survive outer nesting, fail closed, HEAD ----------
+
+/// The split router mounted inside a plain `axum::Router` under a prefix it doesn't know.
+fn nested_in_plain_axum(router: axum::Router) -> axum::Router {
+    axum::Router::new().nest("/api", router)
+}
+
+#[tokio::test]
+async fn validation_still_applies_when_nested_in_a_plain_axum_router() {
+    let inner = ApiRouter::new()
+        .routes(routes![list, input])
+        .map_openapi(|o| {
+            let mut v = serde_json::to_value(o).unwrap();
+            v["components"]["schemas"]["Input"]["properties"]["value"]["maximum"] = serde_json::json!(10);
+            serde_json::from_value(v).unwrap()
+        })
+        .split()
+        .0;
+    let app = nested_in_plain_axum(inner);
+    // Query constraints (limit <= 100) still hold under /api.
+    assert_eq!(app.clone().oneshot(get("/api/items?limit=101")).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(app.clone().oneshot(get("/api/items?limit=5")).await.unwrap().status(), StatusCode::OK);
+    // Body checks use the published (edited) document, not just the Rust type.
+    let json = |b: &'static str| {
+        Request::post("/api/input").header("content-type", "application/json").body(Body::from(b)).unwrap()
+    };
+    assert_eq!(app.clone().oneshot(json(r#"{"value":999}"#)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(app.oneshot(json(r#"{"value":7}"#)).await.unwrap().status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn verify_still_applies_when_nested_in_a_plain_axum_router() {
+    let inner = ApiRouter::new()
+        .routes(routes![ok, raw])
+        .layer(axum::middleware::from_fn(teapot_middleware))
+        .verify_responses(VerifyMode::Panic)
+        .split()
+        .0;
+    let app = nested_in_plain_axum(inner);
+    // Undocumented status from middleware that answers before the route runs.
+    let req = Request::get("/api/ok").header("x-teapot", "1").body(Body::empty()).unwrap();
+    let err = tokio::spawn(app.clone().oneshot(req)).await.expect_err("should panic").into_panic();
+    assert!(err.downcast_ref::<String>().unwrap().contains("418"), "middleware response checked");
+    // Undocumented status from the route itself (`#[raw]` keeps axum's 422).
+    let req = Request::post("/api/raw").header("content-type", "application/json").body(Body::from("{}")).unwrap();
+    let err = tokio::spawn(app.oneshot(req)).await.expect_err("should panic").into_panic();
+    assert!(err.downcast_ref::<String>().unwrap().contains("422"), "route response checked");
+}
+
+#[tokio::test]
+async fn head_requests_are_validated_against_the_get_operation() {
+    let router = ApiRouter::new().routes(routes![list]).split().0;
+    let head = |uri: &'static str| Request::head(uri).body(Body::empty()).unwrap();
+    assert_eq!(router.clone().oneshot(head("/items?limit=101")).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(router.oneshot(head("/items?limit=5")).await.unwrap().status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn routes_missing_from_the_published_document_fail_closed() {
+    let router = ApiRouter::new()
+        .routes(routes![list])
+        .map_openapi(|mut o| {
+            o.paths.paths.clear(); // the document no longer describes GET /items
+            o
+        })
+        .split()
+        .0;
+    let (status, message) = {
+        let res = router.oneshot(get("/items?limit=5")).await.unwrap();
+        let status = res.status();
+        let bytes = http_body_util::BodyExt::collect(res.into_body()).await.unwrap().to_bytes();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    };
+    // The handler maps every Rejection to its 400; what matters is that it's rejected.
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{message}");
+    assert!(message.contains("no operation in the published OpenAPI document"), "{message}");
+}
+
+// ---------- verify_responses: bounded buffering, streams untouched ----------
+
+/// Replaces the body: `x-body: small|large|stream` (all invalid for `Json<u8>`),
+/// optional `x-ct` content type.
+async fn rewrite_body(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let (kind, ct) = (
+        req.headers().get("x-body").map(|v| v.to_str().unwrap().to_owned()),
+        req.headers().get("x-ct").map(|v| v.to_str().unwrap().to_owned()),
+    );
+    let res = next.run(req).await;
+    let Some(kind) = kind else { return res };
+    let (mut parts, _) = res.into_parts();
+    parts.headers.remove("content-length");
+    if let Some(ct) = ct {
+        parts.headers.insert("content-type", ct.parse().unwrap());
+    }
+    let invalid = format!("\"{}\"", "x".repeat(if kind == "large" { 4096 } else { 8 }));
+    let body = match kind.as_str() {
+        "stream" => {
+            let chunks: Vec<Result<String, std::io::Error>> = vec![Ok(invalid[..4].into()), Ok(invalid[4..].into())];
+            Body::from_stream(futures_util::stream::iter(chunks))
+        }
+        _ => Body::from(invalid),
+    };
+    axum::response::Response::from_parts(parts, body)
+}
+
+fn bounded() -> axum::Router {
+    ApiRouter::new()
+        .routes(routes![ok])
+        .layer(axum::middleware::from_fn(rewrite_body))
+        .verify_responses(VerifyMode::Panic)
+        .verify_body_limit(1024)
+        .split()
+        .0
+}
+
+fn rewritten(kind: &str, ct: Option<&str>) -> Request<Body> {
+    let mut req = Request::get("/ok").header("x-body", kind);
+    if let Some(ct) = ct {
+        req = req.header("x-ct", ct);
+    }
+    req.body(Body::empty()).unwrap()
+}
+
+async fn outcome(req: Request<Body>) -> Result<(StatusCode, usize), String> {
+    match tokio::spawn(async move {
+        let res = bounded().oneshot(req).await.unwrap();
+        let status = res.status();
+        let len = http_body_util::BodyExt::collect(res.into_body()).await.unwrap().to_bytes().len();
+        (status, len)
+    })
+    .await
+    {
+        Ok(ok) => Ok(ok),
+        Err(e) => Err(e.into_panic().downcast_ref::<String>().cloned().unwrap_or_default()),
+    }
+}
+
+#[tokio::test]
+async fn small_bodies_are_still_schema_checked() {
+    let err = outcome(rewritten("small", None)).await.expect_err("invalid small body is caught");
+    assert!(err.contains("body doesn't match its schema"), "{err}");
+}
+
+#[tokio::test]
+async fn bodies_over_the_limit_pass_through_unbuffered() {
+    // 4 KiB > 1 KiB limit: not buffered, not schema-checked, delivered intact.
+    assert_eq!(outcome(rewritten("large", None)).await, Ok((StatusCode::OK, 4098)));
+}
+
+#[tokio::test]
+async fn streamed_bodies_pass_through_unbuffered() {
+    assert_eq!(outcome(rewritten("stream", None)).await, Ok((StatusCode::OK, 10)));
+    let sse = outcome(rewritten("small", Some("text/event-stream"))).await;
+    assert!(sse.as_ref().is_err_and(|e| e.contains("content-type `text/event-stream` is not documented")), "{sse:?}");
+}
+
+#[tokio::test]
+async fn status_and_content_type_are_checked_without_buffering() {
+    // Large and streamed bodies still get their content type checked.
+    for kind in ["large", "stream"] {
+        let err = outcome(rewritten(kind, Some("application/xml"))).await.expect_err(kind);
+        assert!(err.contains("content-type `application/xml` is not documented"), "{kind}: {err}");
+    }
+}
