@@ -84,7 +84,7 @@ mod validation;
 pub use doc::{DocCtx, ExtractorDoc, PathValue};
 pub use openapi_axum_macros::{ApiResponse, route};
 pub use rejection::{Rejection, RejectionKind};
-pub use response::{Accepted, ApiResponse, Created, NoContent};
+pub use response::{Accepted, ApiResponse, Created, HeaderText, InvalidHeaderText, NoContent};
 pub use router::{ApiRouter, DEFAULT_VERIFY_BODY_LIMIT, RouteDef, VerifyMode};
 
 /// Collect `#[route]` handlers for [`ApiRouter::routes`]: `routes![get_todo, todos::create_todo]`.

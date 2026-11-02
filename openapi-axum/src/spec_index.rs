@@ -35,6 +35,20 @@ struct OperationSpec {
     responses: HashMap<String, ResponseSpec>,
 }
 
+/// Why a response contradicts the document: a stable `reason` for metrics and a
+/// human-readable `message`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Violation {
+    pub(crate) reason: &'static str,
+    pub(crate) message: String,
+}
+
+impl Violation {
+    pub(crate) fn new(reason: &'static str, message: String) -> Self {
+        Self { reason, message }
+    }
+}
+
 /// Compiled view of an OpenAPI document. Built by `ApiRouter::split`.
 pub struct SpecIndex {
     root: Value,
@@ -395,7 +409,7 @@ impl SpecIndex {
         content_type: Option<&str>,
         body: &[u8],
     ) -> Result<(), String> {
-        self.check_response_with(method, path, status, content_type, Some(body), false)
+        self.check_response_with(method, path, status, content_type, Some(body), false).map_err(|v| v.message)
     }
 
     /// [`check_response`](Self::check_response). `body: None` checks only status and
@@ -409,7 +423,7 @@ impl SpecIndex {
         content_type: Option<&str>,
         body: Option<&[u8]>,
         redact: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), Violation> {
         let Some(op) = self.op(method, path) else { return Ok(()) };
         let label = format!("{method} {path} -> {status}");
         let class = format!("{}XX", status.as_u16() / 100);
@@ -418,15 +432,19 @@ impl SpecIndex {
             .get(status.as_str())
             .or_else(|| op.responses.get(&class))
             .or_else(|| op.responses.get("default"))
-            .ok_or_else(|| format!("{label}: status is not documented"))?;
+            .ok_or_else(|| Violation::new("status_not_documented", format!("{label}: status is not documented")))?;
         let is_documented = |ct: &str| documented.content.iter().any(|(doc_ct, _)| essence(doc_ct) == essence(ct));
         // Body not buffered (streamed or over the limit): status and content type only.
         let Some(body) = body else {
             return match content_type {
-                Some(ct) if documented.content.is_empty() => {
-                    Err(format!("{label}: content-type `{ct}` returned but no body is documented"))
-                }
-                Some(ct) if !is_documented(ct) => Err(format!("{label}: content-type `{ct}` is not documented")),
+                Some(ct) if documented.content.is_empty() => Err(Violation::new(
+                    "body_not_documented",
+                    format!("{label}: content-type `{ct}` returned but no body is documented"),
+                )),
+                Some(ct) if !is_documented(ct) => Err(Violation::new(
+                    "content_type_not_documented",
+                    format!("{label}: content-type `{ct}` is not documented"),
+                )),
                 _ => Ok(()),
             };
         };
@@ -436,28 +454,31 @@ impl SpecIndex {
             return if documented.content.is_empty() {
                 Ok(())
             } else {
-                Err(format!("{label}: documented body is missing"))
+                Err(Violation::new("body_missing", format!("{label}: documented body is missing")))
             };
         }
         if documented.content.is_empty() {
             if body.is_empty() {
                 return Ok(());
             }
-            return Err(format!("{label}: body returned but none is documented"));
+            return Err(Violation::new(
+                "body_not_documented",
+                format!("{label}: body returned but none is documented"),
+            ));
         }
         let ct = content_type.unwrap_or_default();
-        let (_, validator) = documented
-            .content
-            .iter()
-            .find(|(doc_ct, _)| essence(doc_ct) == essence(ct))
-            .ok_or_else(|| format!("{label}: content-type `{ct}` is not documented"))?;
+        let (_, validator) =
+            documented.content.iter().find(|(doc_ct, _)| essence(doc_ct) == essence(ct)).ok_or_else(|| {
+                Violation::new("content_type_not_documented", format!("{label}: content-type `{ct}` is not documented"))
+            })?;
         let instance: Value = if essence(ct).ends_with("json") {
             serde_json::from_slice(body).map_err(|e| {
-                if redact {
+                let message = if redact {
                     format!("{label}: body is not valid JSON")
                 } else {
                     format!("{label}: body is not valid JSON: {e}")
-                }
+                };
+                Violation::new("invalid_json", message)
             })?
         } else {
             Value::String(String::from_utf8_lossy(body).into_owned())
@@ -470,7 +491,10 @@ impl SpecIndex {
         if errors.is_empty() {
             Ok(())
         } else {
-            Err(format!("{label}: body doesn't match its schema: {}", errors.join("; ")))
+            Err(Violation::new(
+                "schema_mismatch",
+                format!("{label}: body doesn't match its schema: {}", errors.join("; ")),
+            ))
         }
     }
 }
@@ -494,14 +518,19 @@ mod tests {
         let body = br#"{"age":"alice@corp.example"}"#;
         let get = axum::http::Method::GET;
         let ok = axum::http::StatusCode::OK;
-        let full = index.check_response_with(&get, "/me", ok, Some("application/json"), Some(body), false).unwrap_err();
+        let full = index
+            .check_response_with(&get, "/me", ok, Some("application/json"), Some(body), false)
+            .unwrap_err()
+            .message;
         let redacted =
-            index.check_response_with(&get, "/me", ok, Some("application/json"), Some(body), true).unwrap_err();
+            index.check_response_with(&get, "/me", ok, Some("application/json"), Some(body), true).unwrap_err().message;
         assert!(full.contains("alice@corp.example"), "tests keep full detail: {full}");
         assert!(!redacted.contains("alice"), "logs never carry values: {redacted}");
         assert!(redacted.contains("`/age` fails `type`"), "{redacted}");
-        let bad_json =
-            index.check_response_with(&get, "/me", ok, Some("application/json"), Some(b"{secret"), true).unwrap_err();
+        let bad_json = index
+            .check_response_with(&get, "/me", ok, Some("application/json"), Some(b"{secret"), true)
+            .unwrap_err()
+            .message;
         assert!(!bad_json.contains("secret"), "{bad_json}");
     }
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- `verify_responses` reports each outcome as a `tracing` event (target `openapi_axum::verify`): `openapi.response_validation.passed`, `.skipped` (`body_too_large`, `unknown_length`, `streaming`) and `.failed` with a reason such as `schema_mismatch` or `status_not_documented`. You can now count how much traffic had its body checked.
+- `verify_body_limit` works before or after `verify_responses`.
+- `HeaderText`: a header value checked when you build it. In a `#[header]` field it can't turn a response into an undocumented `500`.
+- With the `validation` feature off, JSON bodies deserialize directly, with no `serde_json::Value` round trip.
+- Benchmarks (`benches/`, [BENCHMARKS.md](BENCHMARKS.md)): time and allocations per request against plain axum.
+- Docs: `assert_conforms` described as a smoke test, with what it can miss.
+
 ## 0.1.0
 
 First release.

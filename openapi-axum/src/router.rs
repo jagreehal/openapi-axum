@@ -425,6 +425,9 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
 }
 
 #[cfg(feature = "validation")]
+use crate::spec_index::Violation;
+
+#[cfg(feature = "validation")]
 async fn verify(
     axum::extract::State((index, mode, limit)): axum::extract::State<(
         std::sync::Arc<crate::spec_index::SpecIndex>,
@@ -450,30 +453,40 @@ async fn verify(
         Some(RouteId(id)) => match index.route(*id) {
             Some(op) => Some(op),
             None => {
-                report(
-                    mode,
-                    format!("{method} {}: registered route has no published operation", matched.unwrap_or_default()),
-                );
+                let at = format!("{method} {}", matched.unwrap_or_default());
+                let message = format!("{at}: registered route has no published operation");
+                report(mode, &at, Violation::new("operation_missing", message));
                 return res;
             }
         },
         None => matched.and_then(|m| index.by_matched_path(&method, &m)),
     };
     let Some((doc_method, path)) = operation else { return res };
+    let at = format!("{doc_method} {path}");
     let content_type = res.headers().get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
     // Log mode may run on production traffic: never put response values in the message.
     let redact = mode == VerifyMode::Log;
     // Status and content type: no buffering needed.
     if let Err(violation) = index.check_response_with(&doc_method, &path, res.status(), content_type, None, redact) {
-        report(mode, violation);
+        report(mode, &at, violation);
         return res;
     }
     // Body schema: only for bodies of known length within the limit. Streams and large
-    // bodies pass through untouched, so verification never holds them in memory.
+    // bodies pass through untouched, so verification never holds them in memory. Each
+    // skip is reported, so you can see how much of your traffic had its body checked.
     use axum::body::HttpBody as _;
-    let streaming = content_type.is_some_and(|ct| ct.starts_with("text/event-stream"));
     let size = res.body().size_hint().exact();
-    if streaming || size.is_none_or(|n| n > limit as u64) {
+    let skip = if content_type.is_some_and(|ct| ct.starts_with("text/event-stream")) {
+        Some("streaming")
+    } else {
+        match size {
+            None => Some("unknown_length"),
+            Some(n) if n > limit as u64 => Some("body_too_large"),
+            Some(_) => None,
+        }
+    };
+    if let Some(reason) = skip {
+        outcome("skipped", reason, &at);
         return res;
     }
     let (parts, body) = res.into_parts();
@@ -482,23 +495,52 @@ async fn verify(
         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let content_type = parts.headers.get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
-    if let Err(violation) =
-        index.check_response_with(&doc_method, &path, parts.status, content_type, Some(&bytes), redact)
-    {
-        report(mode, violation);
+    match index.check_response_with(&doc_method, &path, parts.status, content_type, Some(&bytes), redact) {
+        Ok(()) => outcome("passed", "body_checked", &at),
+        Err(violation) => report(mode, &at, violation),
     }
     Response::from_parts(parts, Body::from(bytes))
 }
 
+/// A `tracing` event per verified response (target `openapi_axum::verify`), so a
+/// metrics bridge can count checked, skipped and failed responses by `reason`:
+/// `openapi.response_validation.passed` / `.skipped` at debug, `.failed` at error.
 #[cfg(feature = "validation")]
-fn report(mode: VerifyMode, violation: String) {
+fn outcome(kind: &'static str, reason: &'static str, operation: &str) {
+    #[cfg(feature = "tracing")]
+    match kind {
+        "passed" => tracing::debug!(
+            target: "openapi_axum::verify",
+            event = "openapi.response_validation.passed",
+            reason,
+            operation
+        ),
+        _ => tracing::debug!(
+            target: "openapi_axum::verify",
+            event = "openapi.response_validation.skipped",
+            reason,
+            operation
+        ),
+    }
+    #[cfg(not(feature = "tracing"))]
+    let _ = (kind, reason, operation);
+}
+
+#[cfg(feature = "validation")]
+fn report(mode: VerifyMode, operation: &str, violation: Violation) {
+    #[cfg(feature = "tracing")]
+    tracing::error!(
+        target: "openapi_axum::verify",
+        event = "openapi.response_validation.failed",
+        reason = violation.reason,
+        operation,
+        message = %violation.message,
+    );
     match mode {
-        VerifyMode::Panic => panic!("response contract violated: {violation}"),
+        VerifyMode::Panic => panic!("response contract violated: {}", violation.message),
         VerifyMode::Log => {
-            #[cfg(feature = "tracing")]
-            tracing::error!(%violation, "response contract violated");
             #[cfg(not(feature = "tracing"))]
-            eprintln!("response contract violated: {violation}");
+            eprintln!("response contract violated ({operation}, {}): {}", violation.reason, violation.message);
         }
     }
 }
