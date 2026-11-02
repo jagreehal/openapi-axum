@@ -166,7 +166,7 @@ async fn conforms_to_its_docs() {
 }
 ```
 
-It sends one generated request per operation, so treat it as a smoke test, not full contract verification. It catches an undocumented requirement when that requirement makes the generated request fail with a 400, 401, 403, 415 or 422, or with a status the docs don't list. It misses one that fails with some other status the operation documents, such as a `404`. It also fails on undocumented responses. For real credentials, use `Conformance::new(&router, &openapi).credential("bearer", token)`.
+`assert_conforms` is an automated smoke test: one generated request per documented operation. It finds undocumented extractor requirements and response mismatches on the path that request takes, but it doesn't cover every branch or every documented status. It catches an undocumented requirement when that requirement makes the generated request fail with a 400, 401, 403, 415 or 422, or with a status the docs don't list. It misses one that fails with some other status the operation documents, such as a `404`. It also fails on undocumented responses. For real credentials, use `Conformance::new(&router, &openapi).credential("bearer", token)`.
 
 ## Checking responses at runtime
 
@@ -174,7 +174,7 @@ It sends one generated request per operation, so treat it as a smoke test, not f
 
 - It checks the status and content type of every response without reading the body.
 - It checks the body against its schema when the body has a known length of at most 1 MiB. Change the limit with `.verify_body_limit(bytes)`.
-- Streams (unknown length, `text/event-stream`) and larger bodies pass through untouched. The layer never buffers them.
+- It buffers a body only when it's eligible for that check. Streams (unknown length, `text/event-stream`) and bodies over the limit pass through with no buffering and no schema validation. Each skip is reported as a `tracing` event with its reason, so you can see how much traffic had its body checked.
 
 Use `Panic` in tests and `Log` to sample production traffic. `Log` reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
 
@@ -226,7 +226,13 @@ Handlers stay ordinary async functions, so a unit test can call `get_todo(State(
 
 ## Cost
 
-Request validation adds about 1 µs to a small JSON request and about 7 µs to a 1 KB nested one on an M1 Pro. `verify_responses` adds about 1.6 µs and 11 µs more. [BENCHMARKS.md](BENCHMARKS.md) has the method, allocation counts and how to run them yourself.
+These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 7 µs to a 1 KB nested one, 59 to 92% more than plain axum on these small workloads. `verify_responses` adds about 1.6 µs and 11 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
+
+### Choosing what to turn on
+
+- **Request validation** is on by default. It's a crate feature, so it applies to the whole build. To skip body validation for one argument, mark it `#[raw]`; that argument then keeps axum's own rejection. Measure before you turn validation off for performance.
+- **In tests and CI**, add `verify_responses(VerifyMode::Panic)` and `assert_conforms`.
+- **In production**, decide on `verify_responses` per workload. `VerifyMode::Log` with a body limit suits sampling, and its `tracing` events show what it checked and skipped.
 
 ## Features
 
