@@ -23,7 +23,8 @@ pub fn route(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Variants are unit (no body), hold one `Serialize + ToSchema` body, or use named
 /// fields: one `#[body]` plus `#[header("Location")]` fields that are both sent and
-/// documented (`Option<T>` headers are sent only when `Some`). Doc comments become
+/// documented (`Option<T>` headers are sent only when `Some`). A header value that
+/// isn't valid HTTP (e.g. contains a newline) turns the response into a `500`. Doc comments become
 /// response descriptions. Generic enums get the bounds they need automatically.
 #[proc_macro_derive(ApiResponse, attributes(status, body, header))]
 pub fn derive_api_response(item: TokenStream) -> TokenStream {

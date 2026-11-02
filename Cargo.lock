@@ -615,6 +615,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "futures-util",
  "http-body-util",
  "jsonschema",
  "openapi-axum-macros",

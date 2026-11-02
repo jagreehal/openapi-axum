@@ -43,6 +43,19 @@ pub struct RouteDef<S> {
     router: MethodRouter<S>,
 }
 
+/// Identifies a registered route to the validation layer. Attached to each route at
+/// registration, so lookups don't depend on the request's matched path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RouteId(pub(crate) u64);
+
+fn next_route_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Default for [`ApiRouter::verify_body_limit`]: 1 MiB.
+pub const DEFAULT_VERIFY_BODY_LIMIT: usize = 1024 * 1024;
+
 /// What `ApiRouter::verify_responses` does when a response contradicts the document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyMode {
@@ -59,6 +72,10 @@ pub struct ApiRouter<S = ()> {
     registered: BTreeSet<(String, String)>,
     spec_routes: Vec<String>,
     verify: Option<VerifyMode>,
+    /// Kept apart from `verify` so `verify_body_limit` works in either call order.
+    verify_limit: Option<usize>,
+    /// (route id, method, documented path): `nest` re-prefixes, `merge` combines.
+    route_keys: Vec<(u64, Method, String)>,
 }
 
 impl<S: Clone + Send + Sync + 'static> Default for ApiRouter<S> {
@@ -136,7 +153,15 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
 
     /// Start from your own document (info, servers, security schemes...).
     pub fn with_openapi(openapi: OpenApi) -> Self {
-        Self { router: Router::new(), openapi, registered: BTreeSet::new(), spec_routes: Vec::new(), verify: None }
+        Self {
+            router: Router::new(),
+            openapi,
+            registered: BTreeSet::new(),
+            spec_routes: Vec::new(),
+            verify: None,
+            verify_limit: None,
+            route_keys: Vec::new(),
+        }
     }
 
     /// Register a documented route.
@@ -183,7 +208,17 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             components.security_schemes.entry(name).or_insert(scheme);
         }
         self.openapi.paths.add_path_operation(def.path, vec![http_method(&def.method)], op);
-        self.router = self.router.route(def.path, def.router);
+        let id = next_route_id();
+        self.route_keys.push((id, def.method.clone(), def.path.to_owned()));
+        // The id rides on the request (for validation) and the response (for
+        // `verify_responses`, which runs outside the route).
+        let tagged = def.router.layer(axum::Extension(RouteId(id))).layer(axum::middleware::map_response(
+            move |mut res: axum::response::Response| async move {
+                res.extensions_mut().insert(RouteId(id));
+                res
+            },
+        ));
+        self.router = self.router.route(def.path, tagged);
         self
     }
 
@@ -218,6 +253,8 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.openapi.merge(other.openapi);
         self.spec_routes.extend(other.spec_routes);
         self.verify = self.verify.or(other.verify);
+        self.verify_limit = self.verify_limit.or(other.verify_limit);
+        self.route_keys.extend(other.route_keys);
         self
     }
 
@@ -245,6 +282,8 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.openapi.merge(other.openapi);
         self.spec_routes.extend(other.spec_routes.iter().map(|p| nested_path(prefix, p)));
         self.verify = self.verify.or(other.verify);
+        self.verify_limit = self.verify_limit.or(other.verify_limit);
+        self.route_keys.extend(other.route_keys.iter().map(|(id, m, p)| (*id, m.clone(), nested_path(prefix, p))));
         self.router = self.router.nest(prefix, other.router);
         self
     }
@@ -277,6 +316,8 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             registered: self.registered,
             spec_routes: self.spec_routes,
             verify: self.verify,
+            verify_limit: self.verify_limit,
+            route_keys: self.route_keys,
         }
     }
 
@@ -291,16 +332,31 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self
     }
 
-    /// Check every response of a documented route against the document: status
-    /// documented, content type documented, body matches its schema. Applied outermost,
-    /// so it sees what *middleware* and escape hatches (`#[raw]`, layers) actually send.
+    /// Check every response of a documented route against the document. Applied
+    /// outermost, so it sees what *middleware* and escape hatches (`#[raw]`, layers)
+    /// actually send.
     ///
-    /// Responses are buffered to be checked: meant for tests, CI and staging
-    /// (`VerifyMode::Panic`), or production sampling with `VerifyMode::Log`.
+    /// - Status and content type: checked on every response, without touching the body.
+    /// - Body schema: checked when the body has a known length up to the limit
+    ///   ([`DEFAULT_VERIFY_BODY_LIMIT`], change it with
+    ///   [`verify_body_limit`](Self::verify_body_limit)). Only those bodies are
+    ///   buffered. Streams (unknown length, `text/event-stream`) and larger bodies pass
+    ///   through untouched and unbuffered.
+    ///
+    /// Use `VerifyMode::Panic` in tests and CI, `VerifyMode::Log` to sample production.
     #[cfg(feature = "validation")]
     #[must_use]
     pub fn verify_responses(mut self, mode: VerifyMode) -> Self {
         self.verify = Some(mode);
+        self
+    }
+
+    /// Largest response body (bytes) `verify_responses` buffers to check its schema.
+    /// Call it before or after `verify_responses`; it does nothing without it.
+    #[cfg(feature = "validation")]
+    #[must_use]
+    pub fn verify_body_limit(mut self, bytes: usize) -> Self {
+        self.verify_limit = Some(bytes);
         self
     }
 
@@ -348,9 +404,10 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         let mut router = self.router;
         #[cfg(feature = "validation")]
         {
-            let index = std::sync::Arc::new(crate::spec_index::SpecIndex::new(&self.openapi));
+            let index = std::sync::Arc::new(crate::spec_index::SpecIndex::with_routes(&self.openapi, &self.route_keys));
             if let Some(mode) = self.verify {
-                router = router.layer(axum::middleware::from_fn_with_state((index.clone(), mode), verify));
+                let limit = self.verify_limit.unwrap_or(DEFAULT_VERIFY_BODY_LIMIT);
+                router = router.layer(axum::middleware::from_fn_with_state((index.clone(), mode, limit), verify));
             }
             // Lets `ParamsGuard` validate params against the published document.
             router = router.layer(axum::Extension(index));
@@ -369,9 +426,10 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
 
 #[cfg(feature = "validation")]
 async fn verify(
-    axum::extract::State((index, mode)): axum::extract::State<(
+    axum::extract::State((index, mode, limit)): axum::extract::State<(
         std::sync::Arc<crate::spec_index::SpecIndex>,
         VerifyMode,
+        usize,
     )>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -380,27 +438,69 @@ async fn verify(
     use axum::response::{IntoResponse, Response};
 
     let method = req.method().clone();
-    let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_owned());
+    let matched = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_owned());
     let res = next.run(req).await;
-    let Some(path) = path.filter(|_| method != Method::HEAD) else { return res };
+    if method == Method::HEAD {
+        return res;
+    }
+    // The route stamps its id on its response. Middleware that answers before the
+    // route runs leaves no id; then match the path (exact, or a unique suffix when this
+    // router is nested inside another axum Router).
+    let operation = match res.extensions().get::<RouteId>() {
+        Some(RouteId(id)) => match index.route(*id) {
+            Some(op) => Some(op),
+            None => {
+                report(
+                    mode,
+                    format!("{method} {}: registered route has no published operation", matched.unwrap_or_default()),
+                );
+                return res;
+            }
+        },
+        None => matched.and_then(|m| index.by_matched_path(&method, &m)),
+    };
+    let Some((doc_method, path)) = operation else { return res };
+    let content_type = res.headers().get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
+    // Log mode may run on production traffic: never put response values in the message.
+    let redact = mode == VerifyMode::Log;
+    // Status and content type: no buffering needed.
+    if let Err(violation) = index.check_response_with(&doc_method, &path, res.status(), content_type, None, redact) {
+        report(mode, violation);
+        return res;
+    }
+    // Body schema: only for bodies of known length within the limit. Streams and large
+    // bodies pass through untouched, so verification never holds them in memory.
+    use axum::body::HttpBody as _;
+    let streaming = content_type.is_some_and(|ct| ct.starts_with("text/event-stream"));
+    let size = res.body().size_hint().exact();
+    if streaming || size.is_none_or(|n| n > limit as u64) {
+        return res;
+    }
     let (parts, body) = res.into_parts();
-    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+    let bytes = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let content_type = parts.headers.get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
-    if let Err(violation) = index.check_response(&method, &path, parts.status, content_type, &bytes) {
-        match mode {
-            VerifyMode::Panic => panic!("response contract violated: {violation}"),
-            VerifyMode::Log => {
-                #[cfg(feature = "tracing")]
-                tracing::error!(%violation, "response contract violated");
-                #[cfg(not(feature = "tracing"))]
-                eprintln!("response contract violated: {violation}");
-            }
-        }
+    if let Err(violation) =
+        index.check_response_with(&doc_method, &path, parts.status, content_type, Some(&bytes), redact)
+    {
+        report(mode, violation);
     }
     Response::from_parts(parts, Body::from(bytes))
+}
+
+#[cfg(feature = "validation")]
+fn report(mode: VerifyMode, violation: String) {
+    match mode {
+        VerifyMode::Panic => panic!("response contract violated: {violation}"),
+        VerifyMode::Log => {
+            #[cfg(feature = "tracing")]
+            tracing::error!(%violation, "response contract violated");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("response contract violated: {violation}");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 
 You write ordinary axum handlers. openapi-axum reads their signatures and builds the OpenAPI document from them. At runtime it checks requests against that same document.
 
-The document and the code come from one source, so they can't disagree. Return a type the docs don't mention, or a status they don't list, and your code won't compile.
+You declare each endpoint once. For typed handlers the response docs come from the return type, so returning a body or status the docs don't list is a compile error. Custom extractors, middleware and `#[raw]` arguments can still behave in ways the document doesn't describe. For those, openapi-axum gives you runtime checks and a test harness to catch the mismatch.
 
 ```rust
 use axum::{Json, extract::{Path, State}};
@@ -170,9 +170,17 @@ The test fails when the docs leave out something a request needs, such as a head
 
 ## Checking responses at runtime
 
-`ApiRouter::verify_responses(VerifyMode::Panic)` checks each response against the document as it leaves. It sits outside your routes, so it sees what middleware and `#[raw]` arguments send. Use `Panic` in tests and `Log` to sample production traffic. It buffers each response to check it.
+`ApiRouter::verify_responses(VerifyMode::Panic)` checks each response against the document as it leaves. It sits outside your routes, so it sees what middleware and `#[raw]` arguments send.
 
-## Problems caught before deploy
+- It checks the status and content type of every response without reading the body.
+- It checks the body against its schema when the body has a known length of at most 1 MiB. Change the limit with `.verify_body_limit(bytes)`.
+- Streams (unknown length, `text/event-stream`) and larger bodies pass through untouched. The layer never buffers them.
+
+Use `Panic` in tests and `Log` to sample production traffic. `Log` reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
+
+## What gets checked, and when
+
+Each guarantee has a test in the repository: compile errors in `tests/ui/fail`, the rest in `tests/`.
 
 These fail at compile time:
 
@@ -187,6 +195,20 @@ These fail when the router is built, at startup or in your first test:
 - one name used for two different schemas or security schemes,
 - the same method and path registered twice,
 - a `$ref` that doesn't resolve.
+
+These get checked at runtime, on each request or response:
+
+- request bodies, query and path values against the published schemas,
+- with `verify_responses`, statuses, content types and bounded bodies, including what middleware sends.
+
+These need a test, using `assert_conforms`:
+
+- an `ExtractorDoc` that leaves out a header, credential or response its extractor needs,
+- a schema that serde can't satisfy, such as a custom deserializer stricter than the type's schema.
+
+The document can still describe less than your code does in a few places. A custom deserializer that accepts more than its type's schema gets rejected by validation until you describe it with `#[schema(schema_with = ...)]`. A `#[header]` value that isn't a valid HTTP header (a newline, say) turns that response into a `500`, which the docs don't list.
+
+To catch breaking changes between releases, commit your generated document and run a diff tool such as [oasdiff](https://github.com/oasdiff/oasdiff) on it in CI. That answers a different question from the checks above: whether the new document still works for clients that use the old one.
 
 ## Routers
 
@@ -220,7 +242,7 @@ Handlers stay ordinary async functions, so a unit test can call `get_todo(State(
 
 ## Status
 
-0.1, the first release. The API may change before 1.0. Bug reports and small reproductions are welcome.
+0.1, the first release. The API may change before 1.0, and nobody runs it in production yet. Planned next: property-based conformance (several valid and invalid inputs per operation, and an example for each documented error status). Bug reports and small reproductions are welcome.
 
 ## License
 

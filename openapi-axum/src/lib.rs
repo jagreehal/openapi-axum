@@ -1,7 +1,9 @@
 //! # openapi-axum
 //!
-//! Write ordinary axum handlers. The OpenAPI operation is **derived from the
-//! handler's signature**, so the docs can't say something the code doesn't do:
+//! Write ordinary axum handlers. The OpenAPI operation is derived from the
+//! handler's signature, so you declare each endpoint once. Typed responses are
+//! checked at compile time; custom extractors, middleware and `#[raw]` arguments are
+//! covered by runtime validation, `verify_responses` and the `testing` harness.
 //!
 //! - **Responses** come from the return type (`Json<T>` → 200, `Created<T>` → 201,
 //!   `NoContent` → 204, `Result<T, E>` → T's + E's). Error enums use
@@ -83,7 +85,7 @@ pub use doc::{DocCtx, ExtractorDoc, PathValue};
 pub use openapi_axum_macros::{ApiResponse, route};
 pub use rejection::{Rejection, RejectionKind};
 pub use response::{Accepted, ApiResponse, Created, NoContent};
-pub use router::{ApiRouter, RouteDef, VerifyMode};
+pub use router::{ApiRouter, DEFAULT_VERIFY_BODY_LIMIT, RouteDef, VerifyMode};
 
 /// Collect `#[route]` handlers for [`ApiRouter::routes`]: `routes![get_todo, todos::create_todo]`.
 #[macro_export]
