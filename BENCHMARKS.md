@@ -36,23 +36,25 @@ Counted with [dhat](https://docs.rs/dhat) over 2,000 requests, after warm-up.
 
 ## Where request validation's cost goes
 
-The fair comparison is with the hand-checked row: checking these constraints in Rust after typed deserialization costs nothing measurable. Request validation costs more because it validates a generic JSON tree rather than your type. For the nested payload (`cargo bench --bench breakdown`):
+The fair comparison is with the hand-checked row: checking these constraints in Rust after typed deserialization costs nothing measurable. Request validation costs more because it validates a generic JSON tree rather than your type.
 
-| Stage | allocs | bytes |
-|---|---|---|
-| typed parse into the struct (what plain axum does) | 88 | 5.5 KB |
-| parse into `serde_json::Value` | 175 | 19.0 KB |
-| `Value`, then convert into the struct (what validation does) | 197 | 21.1 KB |
-| run the compiled validator on the `Value` | 0 | 0 |
+Each stage for the nested payload: time from criterion under the normal allocator (`cargo bench --bench stages`), allocations from dhat (`cargo bench --bench breakdown`):
 
-So the intermediate `serde_json::Value` accounts for most of the extra memory and time. The validator itself allocates nothing for valid input. It's compiled once, when `split()` builds the router, and reused for every request.
+| Stage | time | allocs | bytes |
+|---|---|---|---|
+| typed parse into the struct (what plain axum does) | 4.3 µs | 88 | 5.5 KB |
+| parse into `serde_json::Value` | 7.2 µs | 175 | 19.0 KB |
+| run the compiled validator on the `Value` | 1.4 µs | 0 | 0 |
+| convert the `Value` into the struct | 2.4 µs | 22 | 2.1 KB |
+
+Validation's path (parse into `Value`, validate, convert) takes 11.0 µs against 4.3 µs for the typed parse: 6.7 µs more, in line with the 6.1 µs measured end to end. Of that, the `Value` round trip takes 5.3 µs (79%) and the schema check 1.4 µs (21%). The validator allocates nothing for valid input. It's compiled once, when `split()` builds the router, and reused for every request.
 
 Removing the `Value` would mean validating a borrowed, zero-copy view of the request bytes, which jsonschema supports through its `Json` trait but openapi-axum doesn't implement yet. Validating your typed value itself would skip the tree, but the checks would then come from somewhere other than the published schema, and the published schema is the one source openapi-axum validates against.
 
 ## Reading the numbers
 
 - With validation compiled out, the remaining cost is fixed per request: the route id, the response stamp and the handler span.
-- `verify_responses` buffers and validates each response body within its limit. Use it in tests and CI, and sample with `VerifyMode::Log` in production if the cost matters.
+- `verify_responses` buffers and validates each response body within its limit. Use it in tests and CI. In production, `verify_sample_every(n)` checks one body in every `n` and `VerifyMode::Log` records failures without failing requests.
 - These are microseconds of CPU per request. Network, database and handler work tend to outweigh them, but measure your own payloads.
 
 ## Not measured here
@@ -67,5 +69,6 @@ Removing the `Value` would mean validating a borrowed, zero-copy view of the req
 cargo bench -p openapi-axum --bench overhead                         # validation on
 cargo bench -p openapi-axum --bench overhead --no-default-features   # validation compiled out
 cargo bench -p openapi-axum --bench allocations                      # add --no-default-features likewise
+cargo bench -p openapi-axum --bench stages                           # stage-by-stage time
 cargo bench -p openapi-axum --bench breakdown                        # stage-by-stage allocations
 ```

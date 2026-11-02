@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+Breaking:
+
+- `ResponseHeader` is sealed: `#[header]` fields hold a `HeaderText` or an `http::HeaderValue`. A user implementation could panic while sending a response, which breaks the guarantee that sending a header can't fail. Convert your own types into a `HeaderText` where you build the response.
+
+Other changes:
+
+- `verify_sample_every(n)`: check the body of one in every `n` responses. Status and content type are still checked on every response. Unsampled bodies are reported as `skipped` with reason `not_sampled`.
+- Docs: `VerifyMode` decides what happens on failure, not which responses get checked. A new `stages` benchmark times each step of request validation, and the docs state the cost split from it.
+
 ## 0.2.0
 
 Breaking:

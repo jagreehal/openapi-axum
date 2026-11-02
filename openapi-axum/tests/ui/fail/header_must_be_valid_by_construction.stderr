@@ -5,7 +5,7 @@ error[E0277]: `std::string::String` can't be a response header
    |          ^^^^^^^^^^^ `#[header]` fields need a type that is a valid header value by construction
    |
    = help: the trait `ResponseHeader` is not implemented for `std::string::String`
-   = note: use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static("...")`), `http::HeaderValue`, or implement `openapi_axum::ResponseHeader`
+   = note: use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static("...")`) or `http::HeaderValue`; convert your own types into one of those where you build the response
 help: the trait `ResponseHeader` is implemented for `HeaderText`
   --> src/response.rs
    |

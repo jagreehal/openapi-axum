@@ -92,3 +92,7 @@ harness = false
 [[bench]]
 name = "breakdown"
 harness = false
+
+[[bench]]
+name = "stages"
+harness = false

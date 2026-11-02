@@ -74,6 +74,8 @@ pub struct ApiRouter<S = ()> {
     verify: Option<VerifyMode>,
     /// Kept apart from `verify` so `verify_body_limit` works in either call order.
     verify_limit: Option<usize>,
+    /// Check bodies of one in every `n` responses (status and content type: all).
+    verify_every: Option<u32>,
     /// (route id, method, documented path): `nest` re-prefixes, `merge` combines.
     route_keys: Vec<(u64, Method, String)>,
 }
@@ -160,6 +162,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             spec_routes: Vec::new(),
             verify: None,
             verify_limit: None,
+            verify_every: None,
             route_keys: Vec::new(),
         }
     }
@@ -254,6 +257,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.spec_routes.extend(other.spec_routes);
         self.verify = self.verify.or(other.verify);
         self.verify_limit = self.verify_limit.or(other.verify_limit);
+        self.verify_every = self.verify_every.or(other.verify_every);
         self.route_keys.extend(other.route_keys);
         self
     }
@@ -283,6 +287,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         self.spec_routes.extend(other.spec_routes.iter().map(|p| nested_path(prefix, p)));
         self.verify = self.verify.or(other.verify);
         self.verify_limit = self.verify_limit.or(other.verify_limit);
+        self.verify_every = self.verify_every.or(other.verify_every);
         self.route_keys.extend(other.route_keys.iter().map(|(id, m, p)| (*id, m.clone(), nested_path(prefix, p))));
         self.router = self.router.nest(prefix, other.router);
         self
@@ -317,6 +322,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             spec_routes: self.spec_routes,
             verify: self.verify,
             verify_limit: self.verify_limit,
+            verify_every: self.verify_every,
             route_keys: self.route_keys,
         }
     }
@@ -348,6 +354,21 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
     #[must_use]
     pub fn verify_responses(mut self, mode: VerifyMode) -> Self {
         self.verify = Some(mode);
+        self
+    }
+
+    /// Sample body checks: check the body of one in every `n` responses (deterministic,
+    /// by count). Status and content type are still checked on every response, since
+    /// they cost almost nothing. Unsampled bodies are reported as `skipped` with reason
+    /// `not_sampled`. `n = 1` (the default) checks every body.
+    ///
+    /// # Panics
+    /// If `n` is 0.
+    #[cfg(feature = "validation")]
+    #[must_use]
+    pub fn verify_sample_every(mut self, n: u32) -> Self {
+        assert!(n > 0, "verify_sample_every(0): use 1 to check every body");
+        self.verify_every = Some(n);
         self
     }
 
@@ -407,7 +428,9 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             let index = std::sync::Arc::new(crate::spec_index::SpecIndex::with_routes(&self.openapi, &self.route_keys));
             if let Some(mode) = self.verify {
                 let limit = self.verify_limit.unwrap_or(DEFAULT_VERIFY_BODY_LIMIT);
-                router = router.layer(axum::middleware::from_fn_with_state((index.clone(), mode, limit), verify));
+                let sampler = Sampler::every(self.verify_every.unwrap_or(1));
+                router =
+                    router.layer(axum::middleware::from_fn_with_state((index.clone(), mode, limit, sampler), verify));
             }
             // Lets `ParamsGuard` validate params against the published document.
             router = router.layer(axum::Extension(index));
@@ -427,12 +450,33 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
 #[cfg(feature = "validation")]
 use crate::spec_index::Violation;
 
+/// Picks one in every `n` responses for a body check, by count.
+#[cfg(feature = "validation")]
+#[derive(Clone)]
+struct Sampler {
+    every: u64,
+    seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+#[cfg(feature = "validation")]
+impl Sampler {
+    fn every(n: u32) -> Self {
+        Self { every: u64::from(n), seen: std::sync::Arc::default() }
+    }
+
+    /// Whether this response's body should be checked.
+    fn take(&self) -> bool {
+        self.every == 1 || self.seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(self.every)
+    }
+}
+
 #[cfg(feature = "validation")]
 async fn verify(
-    axum::extract::State((index, mode, limit)): axum::extract::State<(
+    axum::extract::State((index, mode, limit, sampler)): axum::extract::State<(
         std::sync::Arc<crate::spec_index::SpecIndex>,
         VerifyMode,
         usize,
+        Sampler,
     )>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -486,6 +530,7 @@ async fn verify(
             Some(_) => None,
         }
     };
+    let skip = skip.or_else(|| (!sampler.take()).then_some("not_sampled"));
     if let Some(reason) = skip {
         outcome("skipped", reason, &at);
         return res;
