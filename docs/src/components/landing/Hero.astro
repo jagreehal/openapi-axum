@@ -1,0 +1,597 @@
+---
+import { Code } from 'astro:components';
+import { codeThemes } from '../../lib/code-themes';
+
+/* A person wants the crate; an agent wants the skill that teaches it the API. */
+const installCmds = {
+  humans: 'cargo add openapi-axum',
+  agents: 'npx skills add jagreehal/openapi-axum --skill openapi-axum',
+};
+
+const source = `#[route(GET, "/todos/{id}")]
+async fn get_todo(Path(id): Path<u32>)
+    -> Result<Json<Todo>, ApiError>`;
+
+/* What that route publishes, row by row. */
+const rows = [
+  { key: 'id', where: 'path', what: 'integer, minimum 0' },
+  { key: '200', where: 'application/json', what: 'Todo' },
+  { key: '400', where: 'application/json', what: 'ErrorBody' },
+  { key: '404', where: 'application/json', what: 'ErrorBody' },
+];
+---
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero__grid">
+    <div class="hero__copy">
+      <p class="eyebrow">
+        <span>v0.4</span>
+        <span class="eyebrow__sep" aria-hidden="true">/</span>
+        <span>MIT</span>
+        <span class="eyebrow__sep" aria-hidden="true">/</span>
+        <span>axum 0.8</span>
+      </p>
+
+      <h1 id="hero-title" class="wordmark">
+        openapi-axum<span class="cursor" aria-hidden="true">_</span>
+      </h1>
+
+      <p class="tagline">
+        OpenAPI for axum, from your handler signatures. You write each endpoint
+        once and get the document, request validation and a test harness.
+      </p>
+
+      {/* Radios: the choice is one of two, and :checked swaps the panels with no JS. */}
+      <fieldset class="install-switch">
+        <legend class="sr-only">Install command</legend>
+
+        <input
+          type="radio"
+          name="audience"
+          id="audience-humans"
+          value="humans"
+          checked
+        />
+        <label for="audience-humans">Humans</label>
+
+        <input type="radio" name="audience" id="audience-agents" value="agents" />
+        <label for="audience-agents">Agents</label>
+
+        <div class="install-panels">
+          <div class="install install--humans">
+            <span class="prompt" aria-hidden="true">$</span>
+            <code>{installCmds.humans}</code>
+          </div>
+          <div class="install install--agents">
+            <span class="prompt" aria-hidden="true">$</span>
+            <code>{installCmds.agents}</code>
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <a class="btn btn--primary" href="/openapi-axum/introduction/">
+          <span>Get started</span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="btn btn--ghost" href="https://github.com/jagreehal/openapi-axum">
+          <span>GitHub</span>
+          <span class="arrow" aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="hero__trace">
+      <figure class="doc">
+        <figcaption class="doc__head">
+          <span class="doc__label">OpenAPI</span>
+          <span class="doc__route">GET /todos/&#123;id&#125;</span>
+          <span class="doc__meta">generated</span>
+        </figcaption>
+        <Code class="doc__src" code={source} lang="rust" themes={codeThemes} defaultColor={false} />
+        <dl class="doc__rows">
+          {rows.map((r) => (
+            <div class="doc__row">
+              <dt>{r.key}</dt>
+              <dd class="doc__where">{r.where}</dd>
+              <dd class="doc__what">{r.what}</dd>
+            </div>
+          ))}
+        </dl>
+        <div class="doc__foot">
+          <span class="doc__tab doc__tab--on">docs</span>
+          <span class="doc__tab">validation</span>
+          <span class="doc__tab">tests</span>
+          <span class="doc__note">one signature, one operation</span>
+        </div>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding-block: clamp(2.5rem, 6vw, 5.5rem) clamp(2rem, 5vw, 4.5rem);
+    isolation: isolate;
+  }
+
+  .hero__grid {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+    display: grid;
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: center;
+  }
+
+  @media (min-width: 900px) {
+    .hero__grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.02fr);
+    }
+  }
+
+  .hero__copy {
+    min-width: 0;
+  }
+
+  .eyebrow {
+    font-family: var(--sl-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--color-storm-cloud);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0 0 1.75rem;
+    font-weight: 510;
+  }
+
+  :root[data-theme='light'] .eyebrow {
+    color: var(--sl-color-gray-3);
+  }
+
+  .eyebrow__sep {
+    color: var(--color-fog-grey);
+  }
+
+  :root[data-theme='light'] .eyebrow__sep {
+    color: var(--sl-color-gray-3);
+  }
+
+  .wordmark {
+    font-family: var(--sl-font-mono);
+    font-size: clamp(3.25rem, 8.5vw, 6rem);
+    line-height: 0.94;
+    letter-spacing: -0.045em;
+    font-weight: 400;
+    margin: 0 0 1.5rem;
+    color: var(--color-porcelain);
+    border: 0;
+  }
+
+  :root[data-theme='light'] .wordmark {
+    color: var(--color-pitch-black);
+  }
+
+  /* Blinking cursor: the terminal motif, in the wordmark colour. */
+  .cursor {
+    display: inline-block;
+    color: var(--color-porcelain);
+    margin-left: 0.03em;
+    animation: blink 1.05s steps(1) infinite;
+  }
+
+  :root[data-theme='light'] .cursor {
+    color: var(--color-pitch-black);
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .tagline {
+    font-family: var(--sl-font-mono);
+    font-size: clamp(0.9375rem, 1.1vw, 1.0625rem);
+    line-height: 1.6;
+    color: var(--color-light-steel);
+    max-width: 46ch;
+    margin: 0 0 2rem;
+    letter-spacing: -0.005em;
+  }
+
+  :root[data-theme='light'] .tagline {
+    color: var(--sl-color-gray-2);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .install-switch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    border: 0;
+    padding: 0;
+    margin: 0 0 1.75rem;
+    min-inline-size: 0;
+  }
+
+  /* The radio is the accessible control; the label is what's painted. Clipped
+     rather than sized to zero, so it keeps a box the browser will scroll to
+     when it takes focus. Pointer input arrives through the label, keyboard and
+     assistive tech through the radio itself. */
+  .install-switch input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .install-switch label {
+    padding: 0.3rem 0.75rem;
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 999px;
+    font-family: var(--sl-font-mono);
+    font-size: 0.75rem;
+    letter-spacing: -0.005em;
+    color: var(--color-storm-cloud);
+    cursor: pointer;
+    transition:
+      background var(--sl-transition),
+      border-color var(--sl-transition),
+      color var(--sl-transition);
+  }
+
+  :root[data-theme='light'] .install-switch label {
+    border-color: var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+  }
+
+  .install-switch label:hover {
+    color: var(--color-porcelain);
+    border-color: var(--color-gunmetal);
+  }
+
+  :root[data-theme='light'] .install-switch label:hover {
+    color: var(--color-pitch-black);
+    border-color: var(--sl-color-gray-4);
+  }
+
+  .install-switch input:checked + label {
+    background: var(--color-porcelain);
+    border-color: var(--color-porcelain);
+    color: var(--color-pitch-black);
+  }
+
+  :root[data-theme='light'] .install-switch input:checked + label {
+    background: var(--color-pitch-black);
+    border-color: var(--color-pitch-black);
+    color: var(--color-porcelain);
+  }
+
+  /* Focus lives on the label, since the input it belongs to is visually gone. */
+  .install-switch input:focus-visible + label {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Forces the command onto its own line under the two pills. */
+  .install-panels {
+    flex-basis: 100%;
+    margin-top: 0.6rem;
+  }
+
+  .install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.95rem;
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 6px;
+    background: var(--color-graphite);
+    font-family: var(--sl-font-mono);
+    font-size: 0.8125rem;
+  }
+
+  :root[data-theme='light'] .install {
+    border-color: var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+  }
+
+  /* Only the selected audience's command is rendered at all, so the hidden one
+     is never read out by a screen reader or copied by mistake. */
+  .install--agents,
+  #audience-agents:checked ~ .install-panels .install--humans {
+    display: none;
+  }
+
+  #audience-agents:checked ~ .install-panels .install--agents {
+    display: inline-flex;
+  }
+
+  .install .prompt {
+    color: var(--color-storm-cloud);
+    /* stays put in dark; light needs a darker grey to clear 4.5:1 on gray-6 */
+    user-select: none;
+    font-weight: 590;
+  }
+
+  :root[data-theme='light'] .install .prompt {
+    color: var(--sl-color-gray-3);
+  }
+
+  .install code {
+    color: var(--color-porcelain);
+    background: transparent;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  :root[data-theme='light'] .install code {
+    color: var(--color-pitch-black);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.05rem;
+    font-family: var(--sl-font-mono);
+    font-size: 0.8125rem;
+    font-weight: 510;
+    letter-spacing: -0.005em;
+    text-decoration: none;
+    border-radius: 6px;
+    transition:
+      background var(--sl-transition),
+      border-color var(--sl-transition),
+      color var(--sl-transition);
+  }
+
+  .btn .arrow {
+    transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .btn:hover .arrow {
+    transform: translateX(2px);
+  }
+
+  /* White on black in dark, black on white in light. */
+  .btn--primary {
+    background: var(--color-porcelain);
+    color: var(--color-pitch-black);
+    border: 1px solid var(--color-porcelain);
+  }
+
+  .btn--primary:hover {
+    background: var(--color-alabaster);
+    border-color: var(--color-alabaster);
+  }
+
+  :root[data-theme='light'] .btn--primary {
+    background: var(--color-pitch-black);
+    color: var(--color-porcelain);
+    border-color: var(--color-pitch-black);
+  }
+
+  :root[data-theme='light'] .btn--primary:hover {
+    background: var(--color-charcoal-grey);
+    border-color: var(--color-charcoal-grey);
+  }
+
+  .btn--ghost {
+    background: transparent;
+    color: var(--color-porcelain);
+    border: 1px solid var(--color-muted-ash);
+  }
+
+  .btn--ghost:hover {
+    border-color: var(--color-gunmetal);
+    background: var(--color-graphite);
+  }
+
+  :root[data-theme='light'] .btn--ghost {
+    color: var(--color-pitch-black);
+    border-color: var(--sl-color-gray-5);
+  }
+
+  :root[data-theme='light'] .btn--ghost:hover {
+    border-color: var(--sl-color-gray-4);
+    background: var(--sl-color-gray-6);
+  }
+
+  .hero__trace {
+    min-width: 0;
+  }
+
+  .wordmark {
+    font-size: clamp(2.25rem, 5.4vw, 4rem);
+    white-space: nowrap;
+  }
+
+  .doc {
+    margin: 0;
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 10px;
+    background: var(--color-graphite);
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+      0 24px 60px -32px rgba(0, 0, 0, 0.9);
+    overflow: hidden;
+    font-family: var(--sl-font-mono);
+  }
+
+  :root[data-theme='light'] .doc {
+    background: #ffffff;
+    border-color: #d3d5da;
+    box-shadow: 0 24px 60px -34px rgba(8, 9, 10, 0.28);
+  }
+
+  .doc__head,
+  .doc__foot {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.7rem 1rem;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--color-fog-grey);
+  }
+
+  .doc__head {
+    border-bottom: 1px solid var(--color-charcoal-grey);
+  }
+
+  .doc__foot {
+    border-top: 1px solid var(--color-charcoal-grey);
+  }
+
+  :root[data-theme='light'] .doc__head,
+  :root[data-theme='light'] .doc__foot {
+    border-color: #d3d5da;
+    color: var(--sl-color-gray-3);
+  }
+
+  .doc__label {
+    color: var(--color-storm-cloud);
+    font-weight: 510;
+  }
+
+  .doc__route {
+    color: var(--color-light-steel);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.75rem;
+  }
+
+  :root[data-theme='light'] .doc__route {
+    color: var(--sl-color-gray-2);
+  }
+
+  .doc__meta,
+  .doc__note {
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .doc__src {
+    margin: 0;
+    padding: 1rem 1rem 0.5rem;
+    background: transparent;
+    border: 0;
+    font-size: 0.75rem;
+    line-height: 1.7;
+    color: var(--color-light-steel);
+    overflow-x: auto;
+  }
+
+  :root[data-theme='light'] .doc__src {
+    color: var(--sl-color-gray-2);
+  }
+
+  .doc__src code {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  .doc__rows {
+    margin: 0;
+    padding: 0.5rem 1rem 1rem;
+    display: grid;
+    gap: 0.15rem;
+  }
+
+  .doc__row {
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: baseline;
+    padding: 0.4rem 0;
+    border-bottom: 1px dashed var(--color-charcoal-grey);
+    font-size: 0.75rem;
+  }
+
+  :root[data-theme='light'] .doc__row {
+    border-color: #e3e5e8;
+  }
+
+  .doc__row:last-child {
+    border-bottom: 0;
+  }
+
+  .doc__row dt {
+    color: var(--color-porcelain);
+    font-weight: 590;
+  }
+
+  :root[data-theme='light'] .doc__row dt {
+    color: var(--color-pitch-black);
+  }
+
+  .doc__row dd {
+    margin: 0;
+  }
+
+  .doc__where {
+    color: var(--color-storm-cloud);
+  }
+
+  :root[data-theme='light'] .doc__where {
+    color: var(--sl-color-gray-3);
+  }
+
+  .doc__what {
+    color: var(--color-light-steel);
+  }
+
+  :root[data-theme='light'] .doc__what {
+    color: var(--sl-color-gray-2);
+  }
+
+  .doc__tab {
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+  }
+
+  .doc__tab--on {
+    color: var(--color-aether-blue-soft);
+    background: rgba(59, 130, 246, 0.12);
+  }
+
+  :root[data-theme='light'] .doc__tab--on {
+    color: var(--color-aether-blue-muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor {
+      animation: none !important;
+    }
+  }
+</style>

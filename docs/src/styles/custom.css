@@ -130,6 +130,12 @@ body {
   background: var(--sl-color-bg);
 }
 
+/* Article text reads at 16px; navigation keeps the 14px baseline. */
+.sl-markdown-content {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
 /* ---- Headings: markdown content ---------------------------------------- */
 
 .sl-markdown-content h1 {
@@ -208,8 +214,8 @@ body {
   border: 1px solid var(--color-charcoal-grey);
   border-radius: 6px;
   background: var(--color-graphite);
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.6;
   letter-spacing: -0.005em;
 }
 
@@ -218,10 +224,16 @@ body {
   background: var(--sl-color-bg-inline-code);
 }
 
+/* The landing page's code panels are sized for 13px. */
+[data-has-hero] .sl-markdown-content pre {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .sl-markdown-content code:not(pre code) {
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.86em;
+  font-size: 0.875em;
   background: var(--sl-color-bg-inline-code);
   color: var(--sl-color-light-steel, var(--sl-color-gray-2));
   border: 1px solid var(--color-charcoal-grey);
@@ -497,4 +509,78 @@ header.header .site-title * {
 
 [data-has-hero] header .social-icons a:hover {
   color: var(--sl-color-white);
+}
+
+/* Landing code: Shiki with both themes as CSS variables, switched by the theme picker.
+   The panels supply their own background. */
+.astro-code,
+.astro-code span {
+  color: var(--shiki-dark);
+}
+
+:root[data-theme='light'] .astro-code,
+:root[data-theme='light'] .astro-code span {
+  color: var(--shiki-light);
+}
+
+.astro-code {
+  background-color: transparent !important;
+}
+
+/* ---- Previous / next: plain links ------------------------------------------ */
+.pagination-links {
+  gap: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-charcoal-grey);
+}
+
+:root[data-theme='light'] .pagination-links {
+  border-top-color: var(--sl-color-gray-5);
+}
+
+.pagination-links a {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  gap: 0.4rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-storm-cloud);
+}
+
+:root[data-theme='light'] .pagination-links a {
+  color: var(--sl-color-gray-3);
+}
+
+.pagination-links a svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  align-self: flex-end;
+  margin-bottom: 0.2rem;
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.pagination-links a[rel='next']:hover svg {
+  transform: translateX(2px);
+}
+
+.pagination-links a[rel='prev']:hover svg {
+  transform: translateX(-2px);
+}
+
+.pagination-links .link-title {
+  display: inline-block;
+  margin-top: 0.2rem;
+  font-family: var(--sl-font);
+  font-size: 0.9375rem;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  color: var(--sl-color-white);
+}
+
+.pagination-links a:hover .link-title {
+  color: var(--sl-color-text-accent);
 }

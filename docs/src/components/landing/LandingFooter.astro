@@ -1,0 +1,243 @@
+---
+const year = new Date().getFullYear();
+---
+
+<section class="cta" aria-labelledby="cta-title">
+  <div class="cta__inner">
+    <div class="cta__copy">
+      <p class="cta__eyebrow">Ready to start?</p>
+      <h2 id="cta-title" class="cta__title">
+        One <code>#[route]</code> per handler. The document, validation and tests follow.
+      </h2>
+    </div>
+    <div class="cta__actions">
+      <a class="cta__btn cta__btn--primary" href="/openapi-axum/install/">
+        <span>Install</span>
+        <span aria-hidden="true">→</span>
+      </a>
+      <a class="cta__btn cta__btn--ghost" href="/openapi-axum/introduction/">
+        Read the intro
+      </a>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <div class="foot__inner">
+      <span class="foot__name">openapi-axum</span>
+      <span class="foot__sep" aria-hidden="true">·</span>
+      <span>MIT licensed</span>
+      <span class="foot__sep" aria-hidden="true">·</span>
+      <a href="https://github.com/jagreehal/openapi-axum">GitHub</a>
+      <span class="foot__sep" aria-hidden="true">·</span>
+      <a href="https://crates.io/crates/openapi-axum">crates.io</a>
+      <span class="foot__sep" aria-hidden="true">·</span>
+      <a href="https://github.com/jagreehal/openapi-axum/blob/main/CHANGELOG.md">
+        Changelog
+      </a>
+      <span class="foot__year">© {year}</span>
+    </div>
+  </footer>
+</section>
+
+<style>
+  .cta {
+    border-top: 1px solid var(--color-charcoal-grey);
+    padding-block: var(--section-pad, clamp(3rem, 6vw, 5rem)) 0;
+  }
+
+  :root[data-theme='light'] .cta {
+    border-top-color: var(--sl-color-gray-5);
+  }
+
+  .cta__inner {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+    display: grid;
+    gap: 2rem;
+    align-items: end;
+  }
+
+  @media (min-width: 760px) {
+    .cta__inner {
+      grid-template-columns: 1fr auto;
+    }
+  }
+
+  .cta__eyebrow {
+    margin: 0 0 0.5rem;
+    font-family: var(--sl-font);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--color-storm-cloud);
+    font-weight: 510;
+  }
+
+  .cta__title {
+    margin: 0;
+    font-family: var(--sl-font);
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    line-height: 1.2;
+    letter-spacing: -0.022em;
+    color: var(--color-porcelain);
+    max-width: 32ch;
+    font-weight: 590;
+    border: 0;
+  }
+
+  :root[data-theme='light'] .cta__title {
+    color: var(--color-pitch-black);
+  }
+
+  .cta__title code {
+    font-family: var(--sl-font-mono);
+    font-size: 0.85em;
+    background: var(--color-graphite);
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 4px;
+    padding: 0.05em 0.35em;
+    color: var(--color-porcelain);
+    letter-spacing: -0.005em;
+  }
+
+  :root[data-theme='light'] .cta__title code {
+    background: var(--sl-color-bg-inline-code);
+    border-color: var(--sl-color-gray-5);
+    color: var(--color-pitch-black);
+  }
+
+  .cta__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+  }
+
+  .cta__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    font-family: var(--sl-font);
+    font-size: 0.875rem;
+    font-weight: 590;
+    letter-spacing: -0.011em;
+    text-decoration: none;
+    border-radius: 6px;
+    transition:
+      background var(--sl-transition),
+      border-color var(--sl-transition),
+      color var(--sl-transition);
+  }
+
+  .cta__btn--primary {
+    background: var(--color-porcelain);
+    color: var(--color-pitch-black);
+    border: 1px solid var(--color-porcelain);
+  }
+
+  .cta__btn--primary:hover {
+    background: var(--color-alabaster);
+    border-color: var(--color-alabaster);
+  }
+
+  :root[data-theme='light'] .cta__btn--primary {
+    background: var(--color-pitch-black);
+    color: var(--color-porcelain);
+    border-color: var(--color-pitch-black);
+  }
+
+  :root[data-theme='light'] .cta__btn--primary:hover {
+    background: var(--color-charcoal-grey);
+    border-color: var(--color-charcoal-grey);
+  }
+
+  .cta__btn--ghost {
+    background: transparent;
+    color: var(--color-porcelain);
+    border: 1px solid var(--color-charcoal-grey);
+  }
+
+  :root[data-theme='light'] .cta__btn--ghost {
+    color: var(--color-pitch-black);
+    border-color: var(--sl-color-gray-5);
+  }
+
+  .cta__btn--ghost:hover {
+    background: var(--color-graphite);
+    border-color: var(--color-gunmetal);
+  }
+
+  :root[data-theme='light'] .cta__btn--ghost:hover {
+    background: var(--sl-color-gray-6);
+    border-color: var(--sl-color-gray-4);
+  }
+
+  .foot {
+    margin-top: clamp(3rem, 6vw, 5rem);
+    border-top: 1px solid var(--color-charcoal-grey);
+    padding-block: 1.25rem;
+    background: var(--color-graphite);
+  }
+
+  :root[data-theme='light'] .foot {
+    border-top-color: var(--sl-color-gray-5);
+    background: var(--sl-color-bg-inline-code);
+  }
+
+  :root[data-theme='light'] .foot__inner {
+    color: var(--sl-color-gray-3);
+  }
+
+  :root[data-theme='light'] .foot a:hover {
+    color: var(--color-pitch-black);
+  }
+
+  .foot__inner {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.625rem;
+    font-family: var(--sl-font);
+    font-size: 0.8125rem;
+    color: var(--color-storm-cloud);
+    letter-spacing: -0.011em;
+  }
+
+  .foot__name {
+    font-family: var(--sl-font-mono);
+    color: var(--color-porcelain);
+    font-weight: 400;
+  }
+
+  :root[data-theme='light'] .foot__name {
+    color: var(--color-pitch-black);
+  }
+
+  .foot__sep {
+    color: var(--color-fog-grey);
+  }
+
+  .foot a {
+    color: var(--color-light-steel);
+    text-decoration: none;
+    transition: color var(--sl-transition);
+  }
+
+  :root[data-theme='light'] .foot a {
+    color: var(--sl-color-gray-2);
+  }
+
+  .foot a:hover {
+    color: var(--color-porcelain);
+  }
+
+  .foot__year {
+    margin-left: auto;
+    color: var(--color-fog-grey);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
