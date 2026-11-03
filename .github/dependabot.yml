@@ -11,3 +11,7 @@ updates:
     ignore:
       # The tag is the Rust version (dev toolchain and MSRV), pinned on purpose.
       - dependency-name: dtolnay/rust-toolchain
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly

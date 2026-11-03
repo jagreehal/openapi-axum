@@ -1,0 +1,22 @@
+---
+title: "Features and limits"
+description: "Crate features and known limits."
+---
+
+## Features
+
+| Feature | Default | Adds |
+|---|---|---|
+| `validation` | yes | request validation and `verify_responses` |
+| `tracing` | yes | a span per handler, named after its `operationId` |
+| `testing` | no | `openapi_axum::testing` |
+| `uuid`, `chrono` | no | `Path<Uuid>`, `Path<DateTime<_>>`, `Path<NaiveDate>` |
+
+## Limits
+
+- Extractors count as axum's when you write the bare name (`Json<T>`) or an `axum::` path. A renamed import (`use axum::Json as J`) or a type alias makes them look custom.
+- openapi-axum checks `ExtractorDoc` impls with `assert_conforms`. It can't prove them correct.
+- Validation reads a JSON body twice: once into `serde_json::Value` to check it, then into your type.
+- Recursive types need utoipa's `#[schema(no_recursion)]` on the recursive field.
+- `assert_conforms` can't generate a string for a `pattern`. Give such params and fields an `example`, and it tells you which one when it's missing.
+- Nesting under a prefix with a capture (`/tenant/{tenant}`) panics. Write the full path in `#[route]` and use `merge`.

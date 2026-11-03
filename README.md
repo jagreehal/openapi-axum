@@ -4,6 +4,8 @@
 [![docs.rs](https://docs.rs/openapi-axum/badge.svg)](https://docs.rs/openapi-axum)
 [![CI](https://github.com/jagreehal/openapi-axum/actions/workflows/ci.yml/badge.svg)](https://github.com/jagreehal/openapi-axum/actions/workflows/ci.yml)
 
+Documentation: [jagreehal.github.io/openapi-axum](https://jagreehal.github.io/openapi-axum/)
+
 You write ordinary axum handlers. openapi-axum reads their signatures and builds the OpenAPI document from them. At runtime it checks requests against that same document.
 
 You declare each endpoint once. For typed handlers the response docs come from the return type, so returning a body or status the docs don't list is a compile error. Custom extractors, middleware and `#[raw]` arguments can still behave in ways the document doesn't describe. For those, openapi-axum gives you runtime checks and a test harness to catch the mismatch.
@@ -66,7 +68,7 @@ let (router, openapi) = ApiRouter::new()
 
 ```toml
 [dependencies]
-openapi-axum = { version = "0.1", features = ["uuid"] }
+openapi-axum = { version = "0.4", features = ["uuid"] }
 axum = "0.8"
 utoipa = "6"
 serde = { version = "1", features = ["derive"] }
@@ -174,19 +176,58 @@ async fn conforms_to_its_docs() {
 }
 ```
 
-`assert_conforms` is an automated smoke test: one generated request per documented operation. It finds undocumented extractor requirements and response mismatches on the path that request takes, but it doesn't cover every branch or every documented status. It catches an undocumented requirement when that requirement makes the generated request fail with a 400, 401, 403, 415 or 422, or with a status the docs don't list. It misses one that fails with some other status the operation documents, such as a `404`. It also fails on undocumented responses. For real credentials, use `Conformance::new(&router, &openapi).credential("bearer", token)`.
+`assert_conforms` starts with one request per operation, built from the document. Then it generates more from the schemas:
+
+- **Valid variants**: other values, boundary values such as a `maximum` or `maxLength`, and optional params and fields. Each one must succeed the way the first request did.
+- **Invalid variants**: one path param, query param or JSON body broken at a time (out of range, too long, wrong type, a required field missing). Each one must get a 400, 415 or 422 that the document lists.
+
+The cases are deterministic, so a failure names the request and reproduces on every run:
+
+```text
+POST /tags (generated invalid request, body: `name`: longer than maxLength, value {"name":"aaaaaaaaaaa"}): answered 200 OK
+```
+
+It catches an extractor that needs something the docs leave out, a handler that accepts what the docs forbid, a serde rule stricter than the schema, and responses the docs don't list.
+
+The run returns a report. Print it to see what each operation exercised: the statuses it got, the documented statuses no request reached, and the inputs it couldn't vary.
+
+```text
+GET /codes/{code}: 1 valid, 1 invalid, statuses 200, 400
+  skipped valid variants: path parameter `code` uses its example only (a `pattern` can't be generated)
+GET /items/{id}: 9 valid, 3 invalid, statuses 400, 404; not exercised: 200
+GET /secret-header: 9 valid, 0 invalid, statuses 200; not exercised: 400
+  skipped invalid values: header parameter `x-api-key` isn't generated
+```
+
+Here no generated id exists, so `GET /items/{id}` never returned its `200`. Point the test at your data with `Conformance`:
+
+```rust,ignore
+let report = Conformance::new(&router, &openapi)
+    .credential("bearer", &token)
+    .fixture("id", 42)                                   // every param named `id`
+    .fixture_for("GET /users/{id}", "id", 7)             // one operation
+    .body_for("POST /todos", json!({ "title": "milk" })) // the docs-built body
+    .before_each(|| async { db.reset().await })          // same state for every request
+    .cases(16)
+    .run()
+    .await;
+assert!(report.get("GET /items/{id}").unwrap().not_exercised.is_empty(), "{report}");
+```
+
+Valid variants keep fixture values, so reads and writes hit real rows; invalid variants still break them. `.expect("GET /path", status)` requires a status for one operation and skips its generated cases. `.cases(0)` sends one request per operation.
 
 ## Checking responses at runtime
 
 `ApiRouter::verify_responses(VerifyMode::Panic)` checks each response against the document as it leaves. It sits outside your routes, so it sees what middleware and `#[raw]` arguments send.
 
-- It checks the status and content type of every response without reading the body.
+- It checks the status, content type and documented header values of every response without reading the body. Header values are decoded the way OpenAPI serializes them, so an integer-array header reads `1, 2` as `[1, 2]`.
+- It checks a `HEAD` response's status and headers against the `GET` operation and reports its body as skipped.
 - It checks the body against its schema when the body has a known length of at most 1 MiB. Change the limit with `.verify_body_limit(bytes)`.
 - It buffers a body only when it's eligible for that check. Streams (unknown length, `text/event-stream`) and bodies over the limit pass through with no buffering and no schema validation. Each skip is reported as a `tracing` event with its reason, so you can see how much traffic had its body checked.
 
 The mode decides what happens when a check fails. `Panic` fails the test that caused it. `Log` records the failure and sends the response unchanged; it reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
 
-To control the cost, `.verify_sample_every(n)` checks the body of one in every `n` responses. Status and content type are still checked on every response, since they need no buffering. Unsampled bodies are reported as `skipped` with reason `not_sampled`.
+To control the cost, `.verify_sample_every(n)` checks the body of one in every `n` responses of each operation, so a busy route can't crowd out a quiet one. Status and content type are still checked on every response, since they need no buffering. Unsampled bodies are reported as `skipped` with reason `not_sampled`.
 
 ## What gets checked, and when
 
@@ -197,7 +238,7 @@ These fail at compile time:
 - a body type or status the handler's return type doesn't allow,
 - a tuple path extractor whose length doesn't match the template,
 - duplicate statuses in a response enum, or a body on a `204`,
-- a `#[header]` field whose type isn't a valid header value by construction (a `String`, say), or an invalid header name,
+- a `#[header]` field whose type isn't a valid header value by construction (a `String`, say), an invalid header name, or an invalid literal in `HeaderText::from_static`,
 - extractors that can reject a request in a handler that has no error type to put the rejection in.
 
 These fail when the router is built, at startup or in your first test:
@@ -214,12 +255,12 @@ These get checked at runtime, on each request or response:
 
 These need a test, using `assert_conforms`:
 
-- an `ExtractorDoc` that leaves out a header, credential or response its extractor needs,
+- an `ExtractorDoc` that leaves out a header, credential or response its extractor needs, or promises constraints its extractor doesn't enforce,
 - a schema that serde can't satisfy, such as a custom deserializer stricter than the type's schema.
 
 The document can still describe less than your code does in one place. A custom deserializer that accepts more than its type's schema gets rejected by validation until you describe it with `#[schema(schema_with = ...)]`.
 
-To catch breaking changes between releases, commit your generated document and run a diff tool such as [oasdiff](https://github.com/oasdiff/oasdiff) on it in CI. That answers a different question from the checks above: whether the new document still works for clients that use the old one.
+To catch breaking changes between releases, commit your generated document and run a diff tool such as [oasdiff](https://github.com/oasdiff/oasdiff) on it in CI. That answers a different question from the checks above: whether the new document still works for clients that use the old one. The [CI guide](https://jagreehal.github.io/openapi-axum/guides/ci/) has a workflow you can copy, and the [Schemathesis recipe](https://jagreehal.github.io/openapi-axum/testing/schemathesis/) adds random and stateful testing over HTTP.
 
 ## Routers
 
@@ -237,7 +278,7 @@ Handlers stay ordinary async functions, so a unit test can call `get_todo(State(
 
 ## Cost
 
-These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 6 µs to a 1 KB nested one, 52 to 81% more than plain axum on these small workloads. For the nested payload, parsing into an intermediate `serde_json::Value` and converting it into your type accounts for about 79% of that, and the schema check for about 21%. `verify_responses` adds about 1.5 µs and 10.5 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
+These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. With validation compiled out, openapi-axum adds nothing per request beyond your handler: the same allocations as plain axum, and timings within noise. Request validation adds about 1 µs to a small JSON request and about 6 µs to a 1 KB nested one, 52 to 81% more than plain axum on these small workloads. For the nested payload, parsing into an intermediate `serde_json::Value` and converting it into your type accounts for about 79% of that, and the schema check for about 21%. `verify_responses` adds about 1.5 µs and 10.5 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
 
 ### Choosing what to turn on
 
@@ -259,11 +300,21 @@ These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. 
 - Extractors count as axum's when you write the bare name (`Json<T>`) or an `axum::` path. A renamed import (`use axum::Json as J`) or a type alias makes them look custom.
 - openapi-axum checks `ExtractorDoc` impls with `assert_conforms`. It can't prove them correct.
 - Validation reads a JSON body twice: once into `serde_json::Value` to check it, then into your type.
+- Recursive types need utoipa's `#[schema(no_recursion)]` on the recursive field.
+- `assert_conforms` can't generate a string for a `pattern`. Give such params and fields an `example`, and it tells you which one when it's missing.
 - Nesting under a prefix with a capture (`/tenant/{tenant}`) panics. Write the full path in `#[route]` and use `merge`.
+
+## Agent skill
+
+Install the [`openapi-axum`](skills/openapi-axum/SKILL.md) skill so your coding assistant uses the crate's API:
+
+```bash
+npx skills add jagreehal/openapi-axum --skill openapi-axum
+```
 
 ## Status
 
-0.1, the first release. The API may change before 1.0, and nobody runs it in production yet. Planned next: property-based conformance (several valid and invalid inputs per operation, and an example for each documented error status). Bug reports and small reproductions are welcome.
+0.4. The API may change before 1.0. Issues and small reproductions are welcome.
 
 ## License
 

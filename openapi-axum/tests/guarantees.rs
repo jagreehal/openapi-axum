@@ -1,4 +1,4 @@
-//! The guarantees that used to have asterisks:
+//! Guarantees beyond the compile-time checks:
 //! - query/path constraints and form bodies are validated against the published doc,
 //! - middleware and escape hatches are caught by `verify_responses`,
 //! - hand-written `ExtractorDoc`s are checked by `testing::assert_conforms`.
@@ -216,10 +216,10 @@ async fn verify_catches_raw_escape_hatch_responses() {
 
 // ---------- assert_conforms: hand-written ExtractorDoc is checked ----------
 
-/// Documents `x-api-key`, but actually requires `x-tenant` too: the docs lie.
-struct LyingAuth;
+/// Documents `x-api-key` and also requires `x-tenant`, which its docs leave out.
+struct PartialDocAuth;
 
-impl<S: Send + Sync> FromRequestParts<S> for LyingAuth {
+impl<S: Send + Sync> FromRequestParts<S> for PartialDocAuth {
     type Rejection = StatusCode;
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, StatusCode> {
         let ok = parts.headers.contains_key("x-api-key") && parts.headers.contains_key("x-tenant");
@@ -227,7 +227,7 @@ impl<S: Send + Sync> FromRequestParts<S> for LyingAuth {
     }
 }
 
-impl ExtractorDoc for LyingAuth {
+impl ExtractorDoc for PartialDocAuth {
     fn document(ctx: &mut DocCtx, op: &mut Operation) {
         ctx.header_param::<String>(op, "x-api-key", true, None);
         ctx.empty_response(&mut op.responses, 400, Some("Missing API key"));
@@ -235,21 +235,21 @@ impl ExtractorDoc for LyingAuth {
 }
 
 #[route(GET, "/secret")]
-async fn secret(_a: LyingAuth) -> Json<u8> {
+async fn secret(_a: PartialDocAuth) -> Json<u8> {
     Json(1)
 }
 
-/// The honest version documents both headers.
-struct HonestAuth;
+/// Documents both headers.
+struct FullDocAuth;
 
-impl<S: Send + Sync> FromRequestParts<S> for HonestAuth {
+impl<S: Send + Sync> FromRequestParts<S> for FullDocAuth {
     type Rejection = StatusCode;
     async fn from_request_parts(parts: &mut Parts, s: &S) -> Result<Self, StatusCode> {
-        LyingAuth::from_request_parts(parts, s).await.map(|_| Self)
+        PartialDocAuth::from_request_parts(parts, s).await.map(|_| Self)
     }
 }
 
-impl ExtractorDoc for HonestAuth {
+impl ExtractorDoc for FullDocAuth {
     fn document(ctx: &mut DocCtx, op: &mut Operation) {
         ctx.header_param::<String>(op, "x-api-key", true, None);
         ctx.header_param::<String>(op, "x-tenant", true, None);
@@ -258,29 +258,29 @@ impl ExtractorDoc for HonestAuth {
 }
 
 #[route(GET, "/secret")]
-async fn honest_secret(_a: HonestAuth) -> Json<u8> {
+async fn documented_secret(_a: FullDocAuth) -> Json<u8> {
     Json(1)
 }
 
 #[tokio::test]
-async fn assert_conforms_catches_a_lying_extractor_doc() {
+async fn assert_conforms_catches_an_incomplete_extractor_doc() {
     let (router, openapi) = ApiRouter::new().routes(routes![secret]).split();
     let result = tokio::spawn(async move { assert_conforms(&router, &openapi).await }).await;
-    let msg = result.expect_err("lying docs must fail").into_panic();
+    let msg = result.expect_err("incomplete docs must fail").into_panic();
     let msg = msg.downcast_ref::<String>().cloned().unwrap_or_default();
     assert!(msg.contains("GET /secret: a request built from the docs was rejected (400"), "{msg}");
 
-    let (router, openapi) = ApiRouter::new().routes(routes![honest_secret]).split();
+    let (router, openapi) = ApiRouter::new().routes(routes![documented_secret]).split();
     let report = assert_conforms(&router, &openapi).await;
-    assert_eq!(report, [("GET /secret".to_owned(), StatusCode::OK)]);
+    assert_eq!(report.statuses(), [("GET /secret".to_owned(), StatusCode::OK)]);
 }
 
 #[tokio::test]
-async fn assert_conforms_passes_on_honest_apps() {
+async fn assert_conforms_passes_on_documented_apps() {
     let (router, openapi) = ApiRouter::new().routes(routes![list, by_slug, signup, signup_get]).split();
     let report = assert_conforms(&router, &openapi).await;
     assert_eq!(report.len(), 4);
-    assert!(report.iter().all(|(_, s)| s.is_success()), "{report:?}");
+    assert!(report.statuses().iter().all(|(_, s)| s.is_success()), "{report}");
     let _ = send_checked;
 }
 
@@ -418,7 +418,9 @@ async fn documented_auth(_a: DocumentedAuth) -> Json<u32> {
     Json(1)
 }
 
-async fn conformance_panic(f: impl std::future::Future<Output = Vec<(String, StatusCode)>> + Send + 'static) -> String {
+async fn conformance_panic(
+    f: impl std::future::Future<Output = openapi_axum::testing::Report> + Send + 'static,
+) -> String {
     let err = tokio::spawn(f).await.expect_err("should fail").into_panic();
     err.downcast_ref::<String>().cloned().unwrap_or_default()
 }
@@ -440,10 +442,10 @@ async fn conformance_uses_documented_credentials() {
     assert!(msg.contains(r#"credentials for ["secret"] were rejected"#), "{msg}");
     // With a real credential for the *documented* scheme, it passes.
     let report = Conformance::new(&router, &openapi).credential("secret", "letmein").run().await;
-    assert_eq!(report, [("GET /auth".to_owned(), StatusCode::OK)]);
+    assert_eq!(report.statuses(), [("GET /auth".to_owned(), StatusCode::OK)]);
     // Or the outcome can be declared explicitly.
     let report = Conformance::new(&router, &openapi).expect("GET /auth", StatusCode::UNAUTHORIZED).run().await;
-    assert_eq!(report, [("GET /auth".to_owned(), StatusCode::UNAUTHORIZED)]);
+    assert_eq!(report.statuses(), [("GET /auth".to_owned(), StatusCode::UNAUTHORIZED)]);
 }
 
 // ---------- flatten, referenced bodies, empty text ----------
@@ -566,7 +568,7 @@ fn with_referenced_body(o: utoipa::openapi::OpenApi) -> utoipa::openapi::OpenApi
 async fn harness_sends_referenced_request_bodies() {
     let (router, openapi) = ApiRouter::new().routes(routes![input]).map_openapi(with_referenced_body).split();
     let report = assert_conforms(&router, &openapi).await;
-    assert_eq!(report, [("POST /input".to_owned(), StatusCode::OK)]);
+    assert_eq!(report.statuses(), [("POST /input".to_owned(), StatusCode::OK)]);
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -594,7 +596,7 @@ async fn exploded_array_params_round_trip() {
     assert_eq!(body_of(&router, "/by-ids?ids=1&ids=2").await, (StatusCode::OK, serde_json::json!([1, 2])));
     assert_eq!(body_of(&router, "/by-ids?ids=1&ids=x").await.0, StatusCode::BAD_REQUEST);
     assert_eq!(body_of(&router, "/by-ids?ids=1").await.0, StatusCode::BAD_REQUEST, "min_items = 2");
-    assert_eq!(assert_conforms(&router, &openapi).await, [("GET /by-ids".to_owned(), StatusCode::OK)]);
+    assert_eq!(assert_conforms(&router, &openapi).await.statuses(), [("GET /by-ids".to_owned(), StatusCode::OK)]);
 }
 
 #[tokio::test]
@@ -611,7 +613,7 @@ async fn delimited_array_params_round_trip() {
     assert_eq!(body_of(&router, "/by-ids?ids=1,2").await, (StatusCode::OK, serde_json::json!([1, 2])));
     assert_eq!(body_of(&router, "/by-ids?ids=1,x").await.0, StatusCode::BAD_REQUEST);
     assert_eq!(body_of(&router, "/by-ids?ids=1").await.0, StatusCode::BAD_REQUEST, "min_items = 2");
-    assert_eq!(assert_conforms(&router, &openapi).await, [("GET /by-ids".to_owned(), StatusCode::OK)]);
+    assert_eq!(assert_conforms(&router, &openapi).await.statuses(), [("GET /by-ids".to_owned(), StatusCode::OK)]);
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -630,7 +632,7 @@ async fn any_ids(Query(q): Query<AnyIds>) -> Result<Json<Vec<u32>>, ApiError> {
 async fn required_arrays_without_min_items_are_sent() {
     let (router, openapi) = ApiRouter::new().routes(routes![any_ids]).split();
     assert_eq!(body_of(&router, "/any-ids?ids=1").await, (StatusCode::OK, serde_json::json!([1])));
-    assert_eq!(assert_conforms(&router, &openapi).await, [("GET /any-ids".to_owned(), StatusCode::OK)]);
+    assert_eq!(assert_conforms(&router, &openapi).await.statuses(), [("GET /any-ids".to_owned(), StatusCode::OK)]);
 }
 
 #[test]
@@ -726,7 +728,7 @@ fn unique_dirs(path: &'static str) -> impl FnOnce(utoipa::openapi::OpenApi) -> u
 async fn conformance_with_unique_enum_arrays() {
     let (router, openapi) =
         ApiRouter::new().routes(routes![sorted]).schema::<Direction>().map_openapi(unique_dirs("/sorted")).split();
-    assert_eq!(assert_conforms(&router, &openapi).await, [("GET /sorted".to_owned(), StatusCode::OK)]);
+    assert_eq!(assert_conforms(&router, &openapi).await.statuses(), [("GET /sorted".to_owned(), StatusCode::OK)]);
 
     // Unsatisfiable by generation: the harness says so instead of sending a bad request.
     let (router, openapi) = ApiRouter::new()
@@ -761,7 +763,7 @@ async fn validation_still_applies_when_nested_in_a_plain_axum_router() {
     // Query constraints (limit <= 100) still hold under /api.
     assert_eq!(app.clone().oneshot(get("/api/items?limit=101")).await.unwrap().status(), StatusCode::BAD_REQUEST);
     assert_eq!(app.clone().oneshot(get("/api/items?limit=5")).await.unwrap().status(), StatusCode::OK);
-    // Body checks use the published (edited) document, not just the Rust type.
+    // Body checks use the published (edited) document.
     let json = |b: &'static str| {
         Request::post("/api/input").header("content-type", "application/json").body(Body::from(b)).unwrap()
     };
@@ -1012,4 +1014,304 @@ async fn default_body_limit_applies_before_validation() {
     // Under the limit: validated and handled as usual.
     let res = router.oneshot(post(r#"{"value":7}"#.into())).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+// ---------- generated cases: valid variants and invalid values ----------
+
+#[derive(Deserialize, ToSchema)]
+#[allow(dead_code)]
+struct NewTag {
+    #[schema(min_length = 1, max_length = 10)]
+    name: String,
+}
+
+/// Documents a constrained JSON body and accepts any bytes.
+struct LaxBody;
+
+impl<S: Send + Sync> axum::extract::FromRequest<S> for LaxBody {
+    type Rejection = StatusCode;
+    async fn from_request(req: axum::extract::Request, s: &S) -> Result<Self, StatusCode> {
+        axum::body::Bytes::from_request(req, s).await.map(|_| Self).map_err(|_| StatusCode::BAD_REQUEST)
+    }
+}
+
+impl ExtractorDoc for LaxBody {
+    fn document(ctx: &mut DocCtx, op: &mut Operation) {
+        ctx.json_body::<NewTag>(op);
+        ctx.empty_response(&mut op.responses, 422, Some("Invalid tag"));
+    }
+}
+
+#[route(POST, "/tags")]
+async fn lax_tags(_b: LaxBody) -> Json<u8> {
+    Json(1)
+}
+
+async fn conformance_panic_of(router: axum::Router, openapi: utoipa::openapi::OpenApi) -> String {
+    let err = tokio::spawn(async move { assert_conforms(&router, &openapi).await }).await.expect_err("should fail");
+    err.into_panic().downcast_ref::<String>().cloned().unwrap_or_default()
+}
+
+#[tokio::test]
+async fn generated_invalid_values_catch_unenforced_constraints() {
+    let (router, openapi) = ApiRouter::new().routes(routes![lax_tags]).split();
+    // The docs-built request is valid, so one request per operation passes.
+    openapi_axum::testing::Conformance::new(&router, &openapi).cases(0).run().await;
+    let msg = conformance_panic_of(router, openapi).await;
+    assert!(msg.contains("POST /tags (generated invalid request, body: "), "{msg}");
+    assert!(msg.contains("answered 200 OK"), "{msg}");
+    assert!(msg.contains("doesn't enforce what the docs promise"), "{msg}");
+}
+
+#[derive(Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[allow(dead_code)]
+struct Page {
+    /// Optional, so the docs-built request leaves it out.
+    #[param(maximum = 50)]
+    limit: Option<u32>,
+}
+
+#[route(GET, "/pages")]
+async fn pages(Query(_p): Query<Page>) -> Result<Json<u8>, ApiError> {
+    Ok(Json(1))
+}
+
+/// Rejects any valid `limit` with the documented 400. Only a request that sends a valid
+/// `limit` sees it.
+async fn breaks_on_limit(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let limit = req.uri().query().and_then(|q| q.strip_prefix("limit=")).and_then(|v| v.parse::<u32>().ok());
+    if limit.is_some_and(|l| l <= 50) {
+        let body = Json(serde_json::json!({ "message": "limit unsupported" }));
+        return axum::response::IntoResponse::into_response((StatusCode::BAD_REQUEST, body));
+    }
+    next.run(req).await
+}
+
+#[tokio::test]
+async fn generated_valid_variants_send_optional_inputs() {
+    let build = || ApiRouter::new().routes(routes![pages]).layer(axum::middleware::from_fn(breaks_on_limit)).split();
+    let (router, openapi) = build();
+    openapi_axum::testing::Conformance::new(&router, &openapi).cases(0).run().await;
+    let (router, openapi) = build();
+    let msg = conformance_panic_of(router, openapi).await;
+    assert!(msg.contains("GET /pages (generated valid request: query limit="), "{msg}");
+    assert!(msg.contains("a request built from the docs was rejected (400"), "{msg}");
+}
+
+#[tokio::test]
+async fn generated_cases_pass_on_an_enforcing_handler() {
+    // Optional `limit` gets valid values (incl. the 50 boundary) and invalid ones
+    // (51, "x"); validation rejects the invalid ones with the documented 400.
+    let (router, openapi) = ApiRouter::new().routes(routes![pages]).split();
+    assert_eq!(assert_conforms(&router, &openapi).await.statuses(), [("GET /pages".to_owned(), StatusCode::OK)]);
+}
+
+#[test]
+fn invalid_values_are_labelled_and_fail_their_schema() {
+    let spec = serde_json::json!({});
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["name", "age"],
+        "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 3 },
+            "age": { "type": "integer", "minimum": 0, "maximum": 130 },
+            "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 2, "uniqueItems": true }
+        },
+        "additionalProperties": false
+    });
+    let bad = openapi_axum::testing::invalid_values(&spec, &schema, false);
+    let labels: Vec<&str> = bad.iter().map(|(l, _)| l.as_str()).collect();
+    for want in [
+        "missing required `name`",
+        "missing required `age`",
+        "`name`: shorter than minLength",
+        "`name`: longer than maxLength",
+        "`age`: below minimum",
+        "`age`: above maximum",
+        "`age`: not an integer",
+        "`tags`: more than maxItems",
+        "`tags`: duplicate items",
+        "unexpected field",
+    ] {
+        assert!(labels.contains(&want), "missing {want:?} in {labels:?}");
+    }
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    assert!(bad.iter().all(|(_, v)| !validator.is_valid(v)), "{bad:?}");
+    // As a parameter, only same-type breaks count: `"x"` for a number, bounds.
+    let wire =
+        openapi_axum::testing::invalid_values(&spec, &serde_json::json!({"type": "integer", "maximum": 5}), true);
+    assert_eq!(
+        wire,
+        [("above maximum".to_owned(), serde_json::json!(6)), ("not an integer".into(), serde_json::json!("x"))]
+    );
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+struct Node {
+    value: u8,
+    /// Optional and recursive. utoipa needs `no_recursion` on recursive fields.
+    #[schema(no_recursion)]
+    next: Option<Box<Node>>,
+    #[schema(no_recursion)]
+    children: Option<Vec<Node>>,
+}
+
+#[test]
+fn recursive_optional_schemas_terminate() {
+    let mut schemas = Vec::new();
+    <Node as ToSchema>::schemas(&mut schemas);
+    schemas.push(("Node".into(), <Node as utoipa::PartialSchema>::schema()));
+    let components: serde_json::Map<String, Value> =
+        schemas.into_iter().map(|(n, s)| (n, serde_json::to_value(s).unwrap())).collect();
+    let spec = serde_json::json!({ "components": { "schemas": components } });
+    let node = serde_json::json!({ "$ref": "#/components/schemas/Node" });
+    assert_eq!(openapi_axum::testing::example(&spec, &node), serde_json::json!({ "value": 0 }));
+    let many = openapi_axum::testing::candidates(&spec, &node, 8);
+    assert!(many.len() > 1 && many.iter().any(|v| v.get("next").is_some()), "{many:?}");
+    assert!(!openapi_axum::testing::invalid_values(&spec, &node, false).is_empty());
+}
+
+#[route(POST, "/nodes")]
+async fn nodes(Json(n): Json<Node>) -> Result<Json<Node>, ApiError> {
+    Ok(Json(n))
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Path)]
+#[allow(dead_code)]
+struct Code {
+    #[param(pattern = "^[a-z]{2}$", example = "ab")]
+    code: String,
+}
+
+#[route(GET, "/codes/{code}")]
+async fn code(Path(c): Path<Code>) -> Result<Json<String>, ApiError> {
+    Ok(Json(c.code))
+}
+
+#[tokio::test]
+async fn generated_cases_cover_recursive_bodies_and_encoded_paths() {
+    // `\u{1}!` breaks the pattern; percent-encoded, it reaches the router and gets the 400.
+    let (router, openapi) = ApiRouter::new().routes(routes![nodes, code]).split();
+    assert_eq!(assert_conforms(&router, &openapi).await.len(), 2);
+}
+
+// ---------- conformance reports, fixtures and hooks ----------
+
+#[derive(ApiResponse)]
+enum StoreError {
+    /// Invalid input.
+    #[status(400)]
+    BadRequest(Problem),
+    /// No item with that id.
+    #[status(404)]
+    NotFound(Problem),
+}
+
+impl From<Rejection> for StoreError {
+    fn from(r: Rejection) -> Self {
+        Self::BadRequest(Problem { message: r.message })
+    }
+}
+
+#[route(GET, "/items/{id}")]
+/// Only item 42 exists.
+async fn item(Path(id): Path<u32>) -> Result<Json<u32>, StoreError> {
+    if id == 42 { Ok(Json(id)) } else { Err(StoreError::NotFound(Problem { message: "no such item".into() })) }
+}
+
+#[tokio::test]
+async fn the_report_shows_what_was_exercised_and_skipped() {
+    let (router, openapi) = ApiRouter::new().routes(routes![item, code, secret_header]).split();
+    let report = assert_conforms(&router, &openapi).await;
+    let item = report.get("GET /items/{id}").unwrap();
+    // Generated ids never hit the one that exists.
+    assert_eq!(item.status, StatusCode::NOT_FOUND);
+    assert_eq!(item.not_exercised, ["200"], "{report}");
+    assert!(item.valid_cases > 0 && item.invalid_cases > 0, "{report}");
+    let code = report.get("GET /codes/{code}").unwrap();
+    assert!(code.skipped.iter().any(|s| s.contains("path parameter `code` uses its example only")), "{report}");
+    let secret = report.get("GET /secret-header").unwrap();
+    assert!(secret.skipped.iter().any(|s| s.contains("header parameter `x-api-key` isn't generated")), "{report}");
+    let text = report.to_string();
+    assert!(text.contains("GET /items/{id}:") && text.contains("not exercised: 200"), "{text}");
+}
+
+#[tokio::test]
+async fn fixtures_reach_existing_data() {
+    let (router, openapi) = ApiRouter::new().routes(routes![item]).split();
+    let report = openapi_axum::testing::Conformance::new(&router, &openapi).fixture("id", 42).run().await;
+    let item = report.get("GET /items/{id}").unwrap();
+    assert_eq!(item.status, StatusCode::OK, "{report}");
+    assert!(item.statuses.contains(&200) && item.statuses.contains(&400), "{report}");
+    // Per-operation fixtures win over the shared one.
+    let report = openapi_axum::testing::Conformance::new(&router, &openapi)
+        .fixture("id", 7)
+        .fixture_for("GET /items/{id}", "id", 42)
+        .run()
+        .await;
+    assert_eq!(report.get("GET /items/{id}").unwrap().status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn fixtures_must_match_their_schema() {
+    let (router, openapi) = ApiRouter::new().routes(routes![item]).split();
+    let err = tokio::spawn(async move {
+        openapi_axum::testing::Conformance::new(&router, &openapi).fixture("id", "forty-two").run().await
+    })
+    .await
+    .expect_err("an invalid fixture fails");
+    let msg = err.into_panic().downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(msg.contains("the value supplied for path parameter `id` doesn't match its schema"), "{msg}");
+}
+
+#[tokio::test]
+async fn body_fixtures_and_before_each_hooks() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let (router, openapi) = ApiRouter::new().routes(routes![nodes]).split();
+    let counter = calls.clone();
+    let report = openapi_axum::testing::Conformance::new(&router, &openapi)
+        .body_for("POST /nodes", serde_json::json!({ "value": 9, "next": { "value": 10 } }))
+        .before_each(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .run()
+        .await;
+    let nodes = report.get("POST /nodes").unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1 + nodes.valid_cases + nodes.invalid_cases);
+}
+
+/// Documents a required `x-api-key` header.
+struct ApiKey;
+
+impl<S: Send + Sync> FromRequestParts<S> for ApiKey {
+    type Rejection = StatusCode;
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, StatusCode> {
+        parts.headers.contains_key("x-api-key").then_some(Self).ok_or(StatusCode::BAD_REQUEST)
+    }
+}
+
+impl ExtractorDoc for ApiKey {
+    fn document(ctx: &mut DocCtx, op: &mut Operation) {
+        ctx.header_param::<String>(op, "x-api-key", true, None);
+        ctx.empty_response(&mut op.responses, 400, Some("Missing API key"));
+    }
+}
+
+#[route(GET, "/secret-header")]
+async fn secret_header(_k: ApiKey) -> Json<u8> {
+    Json(1)
+}
+
+#[tokio::test]
+async fn send_checked_accepts_head_responses() {
+    let (router, openapi) = ApiRouter::new().routes(routes![item]).split();
+    let req = Request::head("/items/42").body(Body::empty()).unwrap();
+    let (status, _) = send_checked(&router, &openapi, "/items/{id}", req).await;
+    assert_eq!(status, StatusCode::OK);
 }

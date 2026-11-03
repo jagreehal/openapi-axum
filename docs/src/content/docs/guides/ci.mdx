@@ -1,0 +1,84 @@
+---
+title: "CI: contract checks"
+description: "A workflow you can copy: commit the document, run conformance tests, and block breaking API changes."
+---
+
+Three checks cover the contract in CI:
+
+1. A snapshot test keeps `openapi.json` in the repository in step with the code.
+2. Conformance tests check the app against that document.
+3. [oasdiff](https://github.com/oasdiff/oasdiff) compares the document with the one on `main` and fails on breaking changes.
+
+## Commit the document
+
+```rust
+// tests/openapi.rs
+#[test]
+fn openapi_json_is_current() {
+    let (_, openapi) = my_api::app().split();
+    let json = openapi.to_pretty_json().unwrap() + "\n";
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/openapi.json");
+    if std::env::var_os("UPDATE_OPENAPI").is_some() {
+        std::fs::write(path, &json).unwrap();
+    }
+    let committed = std::fs::read_to_string(path).unwrap_or_default();
+    assert_eq!(committed, json, "openapi.json is out of date: run `UPDATE_OPENAPI=1 cargo test`");
+}
+```
+
+Run `UPDATE_OPENAPI=1 cargo test` after an API change and commit the new `openapi.json`. Your pull request then shows the API change as a diff.
+
+## Check the app against it
+
+```rust
+// tests/conformance.rs
+#[tokio::test]
+async fn conforms_to_its_docs() {
+    let (router, openapi) = my_api::app().verify_responses(openapi_axum::VerifyMode::Panic).split();
+    let report = openapi_axum::testing::Conformance::new(&router, &openapi)
+        .fixture("id", 1)
+        .run()
+        .await;
+    println!("{report}");
+}
+```
+
+`verify_responses(VerifyMode::Panic)` fails the test on any response the document doesn't describe, including ones middleware sends. Run with `--nocapture` to see the report.
+
+## The workflow
+
+```yaml
+# .github/workflows/api-contract.yml
+name: API contract
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+
+  breaking-changes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: git fetch --depth=1 origin ${{ github.base_ref }}
+      - uses: oasdiff/oasdiff-action/breaking@v0
+        with:
+          base: 'origin/${{ github.base_ref }}:openapi.json'
+          revision: 'HEAD:openapi.json'
+          fail-on: ERR
+          github-token: ${{ github.token }}
+```
+
+`test` fails when `openapi.json` is stale or the app breaks its contract. `breaking-changes` fails when the new document would break clients of the old one, such as a removed endpoint or a new required field. Set `fail-on: WARN` to fail on warnings too. In a workspace, write the paths relative to the repository root (`my-api/openapi.json`).

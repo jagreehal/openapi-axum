@@ -1,0 +1,54 @@
+---
+title: Fuzzing with Schemathesis
+description: "Run Schemathesis against a served openapi-axum app for random inputs and multi-step workflows."
+---
+
+`assert_conforms` runs inside `cargo test`, needs no server, and sends the same requests every run. [Schemathesis](https://schemathesis.readthedocs.io/) adds what it leaves out: random inputs over real HTTP, and stateful runs that chain operations, such as creating a resource and then reading it.
+
+## Serve the app
+
+Serve the router with its document:
+
+```rust
+#[tokio::main]
+async fn main() {
+    let (router, _) = my_api::app().spec_route("/openapi.json").split();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    axum::serve(listener, router).await.unwrap();
+}
+```
+
+Add `.verify_responses(VerifyMode::Log)` while you fuzz, and openapi-axum logs each response that breaks the document, with its reason.
+
+## Run it
+
+```bash
+cargo run &
+uvx schemathesis run http://127.0.0.1:3000/openapi.json --wait-for-schema 30
+```
+
+A run goes through its phases in order, ending with the stateful one. To run only the stateful phase:
+
+```bash
+uvx schemathesis run http://127.0.0.1:3000/openapi.json --phases stateful
+```
+
+Schemathesis works out links between operations from the document, and learns more from `Location` headers it sees. A `Created` response with a `#[header("Location")]` field gives it the link from a create to a read.
+
+## In GitHub Actions
+
+```yaml
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - run: ./target/release/my-api &
+      - uses: schemathesis/action@v3
+        with:
+          schema: 'http://127.0.0.1:3000/openapi.json'
+          args: '--wait-for-schema 30'
+```

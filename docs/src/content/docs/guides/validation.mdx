@@ -1,0 +1,13 @@
+---
+title: "Request validation"
+description: "Bodies, query and path values checked against the published schemas."
+---
+
+openapi-axum validates input against the published document before your handler runs:
+
+- JSON and form bodies against their schema,
+- query and path values against their parameter schemas.
+
+So `#[schema(min_length = 1, maximum = 100)]`, `format = "uuid"`, enums and patterns hold at runtime too. A failed check reaches your error type as a `Rejection` with a message such as ``query parameter `limit`: 500 is greater than the maximum of 100``. Changes you make with `map_openapi` apply to validation as well.
+
+To turn it off, leave out the `validation` feature.

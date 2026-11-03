@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- `assert_conforms` generates requests from the schemas: valid variants must succeed, and invalid ones must get a documented 400, 415 or 422. Set the count with `Conformance::cases(n)`.
+- Conformance runs return a `Report`: per operation, the statuses seen, the documented statuses not exercised and the inputs not varied.
+- `Conformance` takes fixtures (`fixture`, `fixture_for`, `body_for`) and a `before_each` hook for predictable state.
+- `verify_responses` checks documented response header values, checks `HEAD` responses against the `GET` operation, and samples per operation with `verify_sample_every(n)`.
+- With validation compiled out, routes carry no per-request layer: the same allocations as plain axum.
+- `testing::invalid_values` returns labelled values that break a schema.
+- Documentation site at [jagreehal.github.io/openapi-axum](https://jagreehal.github.io/openapi-axum/), with a CI guide and a Schemathesis recipe, and an `openapi-axum` agent skill.
+
 ## 0.3.0
 
 - `ResponseHeader` is sealed: `#[header]` fields hold a `HeaderText` or an `http::HeaderValue`, so sending a header can't panic.

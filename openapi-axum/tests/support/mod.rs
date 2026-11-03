@@ -1,6 +1,5 @@
 //! Spec-driven test support shared by the integration tests.
 //!
-//! The idea (schemathesis-lite): never trust the docs and the router separately.
 //! Build a request *from the published spec*, send it to the real router, and check
 //! the response *against the spec*. Any disagreement between docs and runtime fails.
 #![allow(dead_code)]

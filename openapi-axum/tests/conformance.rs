@@ -1,8 +1,8 @@
 //! A kitchen-sink API exercising every supported shape, checked four ways:
 //! 1. the document is valid OpenAPI 3.1 (official meta-schema) with no dangling refs,
-//! 2. a golden snapshot (like Dropshot's `test_openapi.json`) so any doc change is reviewed,
+//! 2. a golden snapshot, so any doc change is reviewed,
 //! 3. every operation accepts a request built *only from its docs*, and every response
-//!    conforms to them (schemathesis-lite),
+//!    conforms to them,
 //! 4. invalid input gets a documented error.
 
 mod support;
@@ -333,8 +333,23 @@ async fn every_operation_accepts_a_request_built_from_its_docs() {
 async fn library_conformance_harness_agrees() {
     let (router, spec) = kitchen_sink();
     let openapi: utoipa::openapi::OpenApi = serde_json::from_value(spec).unwrap();
-    let report = openapi_axum::testing::assert_conforms(&router, &openapi).await;
+    // `#[raw]` keeps axum's own rejection, which the document doesn't list.
+    let report = openapi_axum::testing::Conformance::new(&router, &openapi)
+        .expect("POST /raw", axum::http::StatusCode::OK)
+        .run()
+        .await;
     assert_eq!(report.len(), 18);
+}
+
+#[tokio::test]
+async fn generated_cases_catch_a_raw_rejection() {
+    let (router, spec) = kitchen_sink();
+    let openapi: utoipa::openapi::OpenApi = serde_json::from_value(spec).unwrap();
+    let err = tokio::spawn(async move { openapi_axum::testing::assert_conforms(&router, &openapi).await })
+        .await
+        .expect_err("the raw route's 422 is undocumented");
+    let msg = err.into_panic().downcast::<String>().map(|m| *m).unwrap_or_default();
+    assert!(msg.contains("POST /raw") && msg.contains("422"), "{msg}");
 }
 
 // ---------- 4. invalid input → documented errors ----------

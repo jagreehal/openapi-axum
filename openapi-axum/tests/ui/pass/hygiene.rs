@@ -1,5 +1,5 @@
 #![allow(unused_imports, dead_code)]
-//! The macros' output must not depend on the caller's prelude or imports (cf. poem-openapi's hygiene.rs).
+//! The macros' output must not depend on the caller's prelude or imports.
 
 pub mod models {
     #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]

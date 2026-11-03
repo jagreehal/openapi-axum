@@ -192,8 +192,8 @@ mod sealed {
 /// or `http::HeaderValue`.
 ///
 /// Both are valid header values once they exist, so sending the header can't fail at
-/// response time. The trait is sealed so that guarantee holds: no implementation can
-/// panic or misbehave at send time. For your own types (an `ETag` newtype, say), convert
+/// response time. The trait is sealed, so the guarantee holds for every implementation.
+/// For your own types (an `ETag` newtype, say), convert
 /// into a `HeaderText` where you build the response, e.g. with `impl From<ETag> for HeaderText`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be a response header",

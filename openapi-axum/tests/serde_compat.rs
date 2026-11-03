@@ -7,7 +7,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::Query;
 use axum::http::{Request, StatusCode};
-use openapi_axum::testing::assert_conforms;
+use openapi_axum::testing::{Conformance, assert_conforms};
 use openapi_axum::{ApiResponse, ApiRouter, Rejection, route, routes};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -233,8 +233,12 @@ async fn serde_rejecting_what_the_schema_accepts_is_still_a_documented_400() {
 async fn conformance_flags_schemas_serde_cannot_satisfy() {
     // With an `example` that serde accepts, the docs-built request succeeds...
     let (router, openapi) = ApiRouter::new().routes(routes![even_route]).split();
-    assert_conforms(&router, &openapi).await;
-    // ...without one, the generated `n = 0` (u32's minimum) is schema-valid but serde
+    Conformance::new(&router, &openapi).cases(0).run().await;
+    // ...but generated cases try other schema-valid values, and serde rejects `n = 0`.
+    let err = tokio::spawn(async move { assert_conforms(&router, &openapi).await }).await.expect_err("should fail");
+    let msg = err.into_panic().downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(msg.contains(r#"POST /even (generated valid request: body {"n":0})"#), "{msg}");
+    // Without an example, the generated `n = 0` (u32's minimum) is schema-valid but serde
     // rejects it, and
     // the harness reports that the docs don't describe a valid request.
     let (router, openapi) = ApiRouter::new().routes(routes![odd_route]).split();
@@ -246,5 +250,7 @@ async fn conformance_flags_schemas_serde_cannot_satisfy() {
 #[tokio::test]
 async fn the_whole_app_conforms() {
     let (router, openapi) = app();
-    assert_eq!(assert_conforms(&router, &openapi).await.len(), 9);
+    // `/even` is the schema/serde mismatch from the test above.
+    let report = Conformance::new(&router, &openapi).expect("POST /even", StatusCode::OK).run().await;
+    assert_eq!(report.len(), 9);
 }

@@ -1,0 +1,27 @@
+---
+title: "Runtime checks"
+description: "verify_responses checks responses against the document as they leave."
+---
+
+`ApiRouter::verify_responses(VerifyMode::Panic)` checks each response against the document as it leaves. It sits outside your routes, so it sees what middleware and `#[raw]` arguments send.
+
+- It checks the status, content type and documented header values of every response without reading the body. Header values are decoded the way OpenAPI serializes them, so an integer-array header reads `1, 2` as `[1, 2]`.
+- It checks a `HEAD` response's status and headers against the `GET` operation and reports its body as skipped.
+- It checks the body against its schema when the body has a known length of at most 1 MiB. Change the limit with `.verify_body_limit(bytes)`.
+- It buffers a body only when it's eligible for that check. Streams (unknown length, `text/event-stream`) and bodies over the limit pass through with no buffering and no schema validation. Each skip is reported as a `tracing` event with its reason, so you can see how much traffic had its body checked.
+
+The mode decides what happens when a check fails. `Panic` fails the test that caused it. `Log` records the failure and sends the response unchanged; it reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
+
+To control the cost, `.verify_sample_every(n)` checks the body of one in every `n` responses of each operation, so a busy route can't crowd out a quiet one. Status and content type are still checked on every response, since they need no buffering. Unsampled bodies are reported as `skipped` with reason `not_sampled`.
+
+## Events
+
+`verify_responses` emits a `tracing` event per response on target `openapi_axum::verify`, with a stable `reason`:
+
+| Event | Reasons |
+|---|---|
+| `openapi.response_validation.passed` | `body_checked` |
+| `openapi.response_validation.skipped` | `body_too_large`, `unknown_length`, `streaming`, `not_sampled`, `head_request` |
+| `openapi.response_validation.failed` | `status_not_documented`, `content_type_not_documented`, `header_mismatch`, `body_missing`, `body_not_documented`, `invalid_json`, `schema_mismatch`, `body_unreadable`, `operation_missing` |
+
+Count `skipped` events by `reason` to see how much of your traffic had its body checked, and why the rest didn't.

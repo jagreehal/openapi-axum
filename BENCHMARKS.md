@@ -18,7 +18,7 @@ Criterion medians. The 95% confidence intervals are within 1% of each median.
 |---|---|---|
 | plain axum | 1.3 µs | 11.8 µs |
 | plain axum + the same constraints checked by hand | 1.3 µs | 11.6 µs |
-| openapi-axum, validation compiled out | 1.9 µs | 12.7 µs |
+| openapi-axum, validation compiled out (docs only) | 1.4 µs | 11.8 µs |
 | request validation (default) | 2.4 µs | 17.9 µs |
 | request validation + `verify_responses` | 3.9 µs | 28.3 µs |
 
@@ -30,7 +30,7 @@ Counted with [dhat](https://docs.rs/dhat) over 2,000 requests, after warm-up.
 |---|---|---|
 | plain axum | 30 allocs, 3.4 KB | 246 allocs, 12.2 KB |
 | plain axum + the same constraints checked by hand | 30 allocs, 3.4 KB | 246 allocs, 12.2 KB |
-| openapi-axum, validation compiled out | 46 allocs, 5.6 KB | 262 allocs, 14.4 KB |
+| openapi-axum, validation compiled out (docs only) | 30 allocs, 3.9 KB | 246 allocs, 12.7 KB |
 | request validation (default) | 58 allocs, 7.2 KB | 380 allocs, 31.0 KB |
 | request validation + `verify_responses` | 94 allocs, 10.3 KB | 587 allocs, 52.3 KB |
 
@@ -53,7 +53,7 @@ Removing the `Value` would mean validating a borrowed, zero-copy view of the req
 
 ## Reading the numbers
 
-- With validation compiled out, the remaining cost is fixed per request: the route id, the response stamp and the handler span.
+- With validation compiled out, a route is your handler and nothing else: openapi-axum adds no layer, extension or allocation per request. The 0.5 KB is a larger allocation axum already makes, since `#[route]` wraps your handler to route extractor rejections into your error type. The `tracing` feature adds a span per handler, which costs nothing measurable here with no subscriber installed.
 - `verify_responses` buffers and validates each response body within its limit. Use it in tests and CI. In production, `verify_sample_every(n)` checks one body in every `n` and `VerifyMode::Log` records failures without failing requests.
 - These are microseconds of CPU per request. Network, database and handler work tend to outweigh them, but measure your own payloads.
 
