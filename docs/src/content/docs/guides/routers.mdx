@@ -1,0 +1,16 @@
+---
+title: "Routers"
+description: "ApiRouter: routes, merge, nest and serving the document."
+---
+
+`ApiRouter` wraps `axum::Router` and keeps the document in step with it:
+
+- `.routes(routes![a, b])` adds documented routes.
+- `.route_undocumented(path, method_router)` adds a route that stays out of the docs.
+- `.merge(other)` and `.nest("/v1", other)` combine routers and their docs, using axum's path rules.
+- `.spec_route("/openapi.json")` serves the document.
+- `.map_openapi(|o| ...)` sets the title, servers and security schemes.
+- `.schema::<T>()` registers a schema that nothing else registers.
+- `.split()` returns the `axum::Router` and the `OpenApi`.
+
+Handlers stay ordinary async functions, so a unit test can call `get_todo(State(s), Path(1))` without a router.

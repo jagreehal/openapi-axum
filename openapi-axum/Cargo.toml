@@ -47,6 +47,7 @@ axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+http-body = "1"
 serde = { version = "1", features = ["derive"] }
 utoipa = { version = "6", features = ["uuid"] }
 uuid = { version = "1", features = ["serde", "v4"] }

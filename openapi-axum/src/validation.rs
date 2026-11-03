@@ -225,8 +225,8 @@ mod body {
     type Compiled = (Arc<jsonschema::Validator>, Arc<Value>);
 
     /// One compiled validator per body type, plus a root (components + the body schema
-    /// under `__body`) for resolving refs during form coercion.
-    // ponytail: cached for the process lifetime, keyed by TypeId.
+    /// under `__body`) for resolving refs during form coercion. Cached for the process
+    /// lifetime, keyed by `TypeId`.
     pub(super) fn schema_for<T: ToSchema + 'static>() -> Compiled {
         static CACHE: OnceLock<RwLock<HashMap<TypeId, Compiled>>> = OnceLock::new();
         let cache = CACHE.get_or_init(Default::default);

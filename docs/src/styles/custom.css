@@ -1,0 +1,500 @@
+/* ================================================================
+   openapi-axum docs: pitch-black canvas, layered grays, one
+   electric-blue accent for links, actions and hero highlights.
+   ================================================================ */
+
+:root {
+  /* Surfaces */
+  --color-pitch-black: #08090a;
+  --color-graphite: #0f1011;
+  --color-deep-slate: #161718;
+  --color-charcoal-grey: #23252a;
+  --color-muted-ash: #323334;
+  --color-gunmetal: #383b3f;
+
+  /* Text */
+  --color-porcelain: #f7f8f8;
+  --color-light-steel: #d0d6e0;
+  --color-storm-cloud: #8a8f98;
+  --color-fog-grey: #62666d;
+  --color-alabaster: #e5e5e6;
+
+  /* Accents: single hue (electric blue); legacy lime name maps to same. */
+  --color-aether-blue: #3b82f6;
+  --color-aether-blue-muted: #1d4ed8;
+  --color-aether-blue-soft: #60a5fa;
+  --color-neon-lime: var(--color-aether-blue);
+  --color-warning-red: #eb5757;
+  --color-cyan-spark: #02b8cc;
+  --color-emerald: #27a644;
+
+  /* Shadows */
+  --shadow-card: rgba(0, 0, 0, 0.4) 0 2px 4px 0;
+  --shadow-elevated-inset: rgb(35, 37, 42) 0 0 0 1px inset;
+  --shadow-focus-ring: rgba(59, 130, 246, 0.45);
+
+  /* Type system */
+  --sl-font:
+    'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --sl-font-mono:
+    'Berkeley Mono', 'IBM Plex Mono', 'JetBrains Mono', ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --sl-transition: 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html {
+  font-feature-settings:
+    'cv01' 1,
+    'ss03' 1;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.011em;
+}
+
+/* ---- Dark theme (primary) ----------------------------------------------- */
+
+:root[data-theme='dark'] {
+  /* Starlight token mapping */
+  --sl-color-accent-low: #172554;
+  --sl-color-accent: var(--color-aether-blue);
+  --sl-color-accent-high: #93c5fd;
+
+  --sl-color-white: var(--color-porcelain);
+  --sl-color-gray-1: #eceef0; /* very high contrast text */
+  --sl-color-gray-2: var(--color-light-steel);
+  --sl-color-gray-3: var(--color-storm-cloud);
+  --sl-color-gray-4: var(--color-fog-grey);
+  --sl-color-gray-5: var(--color-muted-ash);
+  --sl-color-gray-6: var(--color-charcoal-grey);
+  --sl-color-black: var(--color-pitch-black);
+
+  /* The quiet metadata grey has to be readable, and no single value clears
+     4.5:1 against both a near-black and a near-white surface: so it is
+     tuned per theme rather than shared. */
+  --color-fog-grey: #818691;
+
+  --sl-color-text: var(--color-porcelain);
+  --sl-color-text-accent: var(--color-aether-blue);
+
+  --sl-color-bg: var(--color-pitch-black);
+  --sl-color-bg-nav: var(--color-pitch-black);
+  --sl-color-bg-sidebar: var(--color-pitch-black);
+  --sl-color-bg-inline-code: var(--color-graphite);
+
+  /* Shiki code highlighting on Graphite surfaces */
+  --astro-code-color-background: var(--color-graphite);
+  --astro-code-color-text: var(--color-porcelain);
+}
+
+/* ---- Light theme -------------------------------------------------------- */
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #eff6ff;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #1d4ed8;
+
+  --sl-color-white: var(--color-pitch-black);
+  --sl-color-gray-1: #1f2024;
+  --sl-color-gray-2: #353841;
+  --sl-color-gray-3: #545861;
+  --sl-color-gray-4: #888b96;
+  --sl-color-gray-5: #d3d5da;
+  --sl-color-gray-6: #ececef;
+  --sl-color-black: var(--color-porcelain);
+
+  --color-fog-grey: #5f636c;
+
+  --sl-color-text: var(--color-pitch-black);
+  /* Link text uses the dark end of the ramp: #3b82f6 is only 3.46:1 on the
+     light background. --sl-color-accent stays bright for filled surfaces. */
+  --sl-color-text-accent: #1d4ed8;
+
+  --sl-color-bg: var(--color-porcelain);
+  --sl-color-bg-nav: var(--color-porcelain);
+  --sl-color-bg-sidebar: var(--color-porcelain);
+  --sl-color-bg-inline-code: #f0f1f3;
+}
+
+/* ---- Body baseline ------------------------------------------------------ */
+
+body {
+  font-family: var(--sl-font);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.011em;
+  color: var(--sl-color-text);
+  background: var(--sl-color-bg);
+}
+
+/* ---- Headings: markdown content ---------------------------------------- */
+
+.sl-markdown-content h1 {
+  font-size: clamp(1.75rem, 2.4vw, 2.25rem);
+  font-weight: 590;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content h2 {
+  font-size: 1.375rem;
+  font-weight: 590;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
+  margin-top: 2.5rem;
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.0625rem;
+  font-weight: 510;
+  line-height: 1.4;
+  letter-spacing: -0.013em;
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content h4 {
+  font-size: 0.9375rem;
+  font-weight: 510;
+  letter-spacing: -0.012em;
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content p,
+.sl-markdown-content li {
+  color: var(--sl-color-gray-2);
+}
+
+/* Body-text link styling: Aether Blue for actual prose links.
+   Exclusions are wrapped in :where() so they don't bump specificity, which
+   lets .foot a / component-scoped overrides win on equal terms. */
+.sl-markdown-content a:where(:not(.btn, .chip, .cta__btn, .copy-markdown-btn)) {
+  color: var(--sl-color-text-accent);
+  text-decoration: none;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: color var(--sl-transition);
+}
+
+.sl-markdown-content
+  a:where(:not(.btn, .chip, .cta__btn, .copy-markdown-btn)):hover {
+  color: var(--sl-color-accent-high);
+  text-decoration: underline;
+}
+
+/* Landing footer links: quiet, light steel; hover Aether Blue. The inner
+   <a> tags don't carry a class so we have to take them by parent specificity. */
+.sl-markdown-content .foot a {
+  color: var(--color-light-steel);
+  text-decoration: none;
+}
+
+.sl-markdown-content .foot a:hover {
+  color: var(--color-aether-blue);
+  text-decoration: none;
+}
+
+:root[data-theme='light'] .sl-markdown-content .foot a {
+  color: var(--sl-color-gray-2);
+}
+
+/* ---- Code ---------------------------------------------------------------- */
+
+.sl-markdown-content pre {
+  border: 1px solid var(--color-charcoal-grey);
+  border-radius: 6px;
+  background: var(--color-graphite);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+:root[data-theme='light'] .sl-markdown-content pre {
+  border-color: var(--sl-color-gray-5);
+  background: var(--sl-color-bg-inline-code);
+}
+
+.sl-markdown-content code:not(pre code) {
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.86em;
+  background: var(--sl-color-bg-inline-code);
+  color: var(--sl-color-light-steel, var(--sl-color-gray-2));
+  border: 1px solid var(--color-charcoal-grey);
+}
+
+:root[data-theme='light'] .sl-markdown-content code:not(pre code) {
+  border-color: var(--sl-color-gray-5);
+}
+
+/* ---- Tables -------------------------------------------------------------- */
+
+.sl-markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+  letter-spacing: -0.01em;
+}
+
+.sl-markdown-content th {
+  font-weight: 510;
+  text-align: left;
+  border-bottom: 1px solid var(--color-charcoal-grey);
+  color: var(--sl-color-white);
+  padding: 0.75rem 0.875rem;
+}
+
+.sl-markdown-content td {
+  padding: 0.65rem 0.875rem;
+  border-bottom: 1px solid var(--color-charcoal-grey);
+  color: var(--sl-color-gray-2);
+}
+
+.sl-markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ---- Blockquotes / asides ----------------------------------------------- */
+
+.sl-markdown-content blockquote {
+  margin: 1.5rem 0;
+  padding: 0.875rem 1rem;
+  background: var(--color-graphite);
+  border: 1px solid var(--color-charcoal-grey);
+  border-radius: 6px;
+  color: var(--sl-color-gray-2);
+}
+
+.sl-markdown-content blockquote p {
+  margin: 0;
+}
+
+/* ---- Splash hero overrides ---------------------------------------------- */
+
+[data-has-hero] main {
+  padding-inline: 0 !important;
+}
+
+[data-has-hero] .sl-container,
+[data-has-hero] main > .content-panel,
+[data-has-hero] main .sl-markdown-content {
+  max-width: none !important;
+  margin-inline: 0 !important;
+  padding-inline: 0 !important;
+}
+
+[data-has-hero] main .sl-markdown-content {
+  text-align: left;
+}
+
+[data-has-hero] .hero .actions:empty {
+  display: none;
+}
+
+.hero .tagline {
+  font-size: 1.0625rem;
+  max-width: 42ch;
+  letter-spacing: -0.012em;
+}
+
+nav.sidebar .top-level > li + li {
+  margin-top: 0.125rem;
+}
+
+nav.sidebar a {
+  letter-spacing: -0.011em;
+}
+
+/* Expressive Code: Carbon-style terminal chrome (traffic lights + depth) */
+.expressive-code figure.frame.is-terminal {
+  overflow: hidden;
+}
+
+.expressive-code figure.frame.is-terminal figcaption.header::before {
+  opacity: 1;
+  width: 3.25rem;
+  height: 0.6875rem;
+  background-color: transparent;
+  background-image:
+    radial-gradient(circle at center, #ff5f57 0%, #ff5f57 45%, transparent 46%),
+    radial-gradient(circle at center, #febc2e 0%, #febc2e 45%, transparent 46%),
+    radial-gradient(circle at center, #28c840 0%, #28c840 45%, transparent 46%);
+  background-size: 0.6875rem 0.6875rem;
+  background-position:
+    0 50%,
+    1.28125rem 50%,
+    2.5625rem 50%;
+  background-repeat: no-repeat;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+:root[data-theme='light']
+  .expressive-code
+  figure.frame.is-terminal
+  figcaption.header {
+  color: #374151;
+  background: linear-gradient(180deg, #f3f3f3 0%, #e8e8e8 100%);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme='dark']
+  .expressive-code
+  figure.frame.is-terminal
+  figcaption.header {
+  color: #d1d5db;
+  background: linear-gradient(180deg, #3a3a3a 0%, #2f2f2f 100%);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.expressive-code figure.frame.is-terminal figcaption.header .title:not(:empty) {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+nav.sidebar a[aria-current='page'] {
+  background: var(--color-graphite);
+  color: var(--sl-color-white);
+  border-radius: 4px;
+}
+
+:root[data-theme='light'] nav.sidebar a[aria-current='page'] {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+}
+
+/* Top nav */
+header.header {
+  border-bottom: 1px solid var(--color-charcoal-grey);
+  background: color-mix(in oklch, var(--color-pitch-black) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+:root[data-theme='light'] header.header {
+  background: color-mix(in oklch, var(--color-porcelain) 88%, transparent);
+  border-color: var(--sl-color-gray-5);
+}
+
+/* Site title */
+.site-title {
+  letter-spacing: -0.018em;
+  font-weight: 510;
+}
+
+header.header .site-title,
+header.header .site-title * {
+  color: var(--sl-color-white);
+}
+
+:root[data-theme='light'] header.header .site-title,
+:root[data-theme='light'] header.header .site-title * {
+  color: var(--color-pitch-black);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--color-aether-blue) 38%, transparent);
+  color: var(--sl-color-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-aether-blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Scrollbar: subtle, dark */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted-ash) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-muted-ash);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gunmetal);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+.sl-markdown-no-margin
+  :not(a, strong, em, del, span, input, code, br)
+  + :not(a, strong, em, del, span, input, code, br, :where(.not-content *)) {
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* ================================================================
+   Landing (splash): austere, mono, dark by default but fully theme-aware:
+   every component ships light overrides so the toggle works here too. The
+   trace island stays dark in both themes (it reads as a product screenshot).
+   Scoped to [data-has-hero], the body attribute Starlight sets on the splash
+   route.
+   ================================================================ */
+
+/* Mono-everything: remap the sans token so every landing component's
+   var(--sl-font) resolves to JetBrains Mono, and lock the mono stack to a
+   font we actually ship so rendering is identical for every visitor. */
+[data-has-hero] main {
+  --sl-font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
+  --sl-font: var(--sl-font-mono);
+  /* Shared vertical rhythm: generous negative space between sections. */
+  --section-pad: clamp(4.25rem, 8.5vw, 7.5rem);
+}
+
+/* Grain across the whole landing: faint, non-interactive, sits on top. */
+[data-has-hero]::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+}
+
+/* Monochrome focus ring on the landing: keep blue out of the chrome.
+   --sl-color-white flips per theme, so the ring stays the highest-contrast
+   ink in both (porcelain on black, pitch-black on porcelain). */
+[data-has-hero] :focus-visible {
+  outline-color: var(--sl-color-white);
+}
+
+/* Keep blue out of the landing chrome: social icons stay quiet grey. */
+[data-has-hero] header .social-icons a {
+  color: var(--sl-color-gray-3);
+}
+
+[data-has-hero] header .social-icons a:hover {
+  color: var(--sl-color-white);
+}

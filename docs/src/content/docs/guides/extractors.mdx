@@ -1,0 +1,24 @@
+---
+title: "Custom extractors"
+description: "Document auth, header and cookie extractors with ExtractorDoc."
+---
+
+Auth, header and cookie extractors describe themselves by implementing `ExtractorDoc`. Each route that takes the extractor gets those docs.
+
+```rust
+use openapi_axum::{DocCtx, ExtractorDoc};
+use utoipa::openapi::path::Operation;
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+
+struct Bearer(String);
+
+impl ExtractorDoc for Bearer {
+    fn document(ctx: &mut DocCtx, op: &mut Operation) {
+        let scheme = SecurityScheme::Http(HttpBuilder::new().scheme(HttpAuthScheme::Bearer).build());
+        ctx.security(op, "bearer", &[], scheme);
+        ctx.empty_response(&mut op.responses, 401, Some("Missing or invalid token"));
+    }
+}
+```
+
+`ctx.header_param` and `ctx.cookie_param` cover headers and cookies. Rust can't check these docs against your extractor, so [conformance tests](/openapi-axum/testing/conformance/) check them.

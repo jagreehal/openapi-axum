@@ -45,6 +45,7 @@ pub struct RouteDef<S> {
 
 /// Identifies a registered route to the validation layer. Attached to each route at
 /// registration, so lookups don't depend on the request's matched path.
+#[cfg(feature = "validation")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RouteId(pub(crate) u64);
 
@@ -214,14 +215,18 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
         let id = next_route_id();
         self.route_keys.push((id, def.method.clone(), def.path.to_owned()));
         // The id rides on the request (for validation) and the response (for
-        // `verify_responses`, which runs outside the route).
-        let tagged = def.router.layer(axum::Extension(RouteId(id))).layer(axum::middleware::map_response(
+        // `verify_responses`, which runs outside the route). Without validation, the
+        // route is the handler alone.
+        #[cfg(feature = "validation")]
+        let route = def.router.layer(axum::Extension(RouteId(id))).layer(axum::middleware::map_response(
             move |mut res: axum::response::Response| async move {
                 res.extensions_mut().insert(RouteId(id));
                 res
             },
         ));
-        self.router = self.router.route(def.path, tagged);
+        #[cfg(not(feature = "validation"))]
+        let route = def.router;
+        self.router = self.router.route(def.path, route);
         self
     }
 
@@ -342,14 +347,17 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
     /// outermost, so it sees what *middleware* and escape hatches (`#[raw]`, layers)
     /// actually send.
     ///
-    /// - Status and content type: checked on every response, without touching the body.
+    /// - Status, content type and documented header values: checked on every response,
+    ///   without touching the body. `HEAD` responses get these checks against the `GET`
+    ///   operation, and their body check is skipped.
     /// - Body schema: checked when the body has a known length up to the limit
     ///   ([`DEFAULT_VERIFY_BODY_LIMIT`], change it with
     ///   [`verify_body_limit`](Self::verify_body_limit)). Only those bodies are
     ///   buffered. Streams (unknown length, `text/event-stream`) and larger bodies pass
     ///   through untouched and unbuffered.
     ///
-    /// Use `VerifyMode::Panic` in tests and CI, `VerifyMode::Log` to sample production.
+    /// Each response gets a `tracing` event saying it passed, failed or why its body was
+    /// skipped. Use `VerifyMode::Panic` in tests and CI, `VerifyMode::Log` in production.
     #[cfg(feature = "validation")]
     #[must_use]
     pub fn verify_responses(mut self, mode: VerifyMode) -> Self {
@@ -428,7 +436,7 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
             let index = std::sync::Arc::new(crate::spec_index::SpecIndex::with_routes(&self.openapi, &self.route_keys));
             if let Some(mode) = self.verify {
                 let limit = self.verify_limit.unwrap_or(DEFAULT_VERIFY_BODY_LIMIT);
-                let sampler = Sampler::every(self.verify_every.unwrap_or(1));
+                let sampler = Sampler::new(self.verify_every.unwrap_or(1), &index);
                 router =
                     router.layer(axum::middleware::from_fn_with_state((index.clone(), mode, limit, sampler), verify));
             }
@@ -450,23 +458,29 @@ impl<S: Clone + Send + Sync + 'static> ApiRouter<S> {
 #[cfg(feature = "validation")]
 use crate::spec_index::Violation;
 
-/// Picks one in every `n` responses for a body check, by count.
+/// Picks one in every `n` responses for a body check, counted per operation, so each
+/// operation gets checked.
 #[cfg(feature = "validation")]
 #[derive(Clone)]
 struct Sampler {
     every: u64,
-    seen: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    seen: std::sync::Arc<std::collections::HashMap<(Method, String), std::sync::atomic::AtomicU64>>,
 }
 
 #[cfg(feature = "validation")]
 impl Sampler {
-    fn every(n: u32) -> Self {
-        Self { every: u64::from(n), seen: std::sync::Arc::default() }
+    fn new(n: u32, index: &crate::spec_index::SpecIndex) -> Self {
+        let seen = index.operation_keys().map(|k| (k.clone(), std::sync::atomic::AtomicU64::new(0))).collect();
+        Self { every: u64::from(n), seen: std::sync::Arc::new(seen) }
     }
 
-    /// Whether this response's body should be checked.
-    fn take(&self) -> bool {
-        self.every == 1 || self.seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(self.every)
+    /// Whether this response's body should be checked: the 1st, (n+1)th, ... per operation.
+    fn take(&self, op: &(Method, String)) -> bool {
+        self.every == 1
+            || self
+                .seen
+                .get(op)
+                .is_none_or(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed).is_multiple_of(self.every))
     }
 }
 
@@ -487,9 +501,6 @@ async fn verify(
     let method = req.method().clone();
     let matched = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_owned());
     let res = next.run(req).await;
-    if method == Method::HEAD {
-        return res;
-    }
     // The route stamps its id on its response. Middleware that answers before the
     // route runs leaves no id; then match the path (exact, or a unique suffix when this
     // router is nested inside another axum Router).
@@ -511,9 +522,17 @@ async fn verify(
     let content_type = res.headers().get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
     // Log mode may run on production traffic: never put response values in the message.
     let redact = mode == VerifyMode::Log;
-    // Status and content type: no buffering needed.
-    if let Err(violation) = index.check_response_with(doc_method, path, res.status(), content_type, None, redact) {
+    // Status, content type and header values: no buffering needed.
+    let checked = index
+        .check_response_with(doc_method, path, res.status(), content_type, None, redact)
+        .and_then(|()| index.check_headers(doc_method, path, res.status(), res.headers(), redact));
+    if let Err(violation) = checked {
         report(mode, &at, violation);
+        return res;
+    }
+    // A HEAD response describes the GET response without its body.
+    if method == Method::HEAD {
+        outcome("skipped", "head_request", &at);
         return res;
     }
     // Body schema: only for bodies of known length within the limit. Streams and large
@@ -530,7 +549,7 @@ async fn verify(
             Some(_) => None,
         }
     };
-    let skip = skip.or_else(|| (!sampler.take()).then_some("not_sampled"));
+    let skip = skip.or_else(|| (!sampler.take(&op)).then_some("not_sampled"));
     if let Some(reason) = skip {
         outcome("skipped", reason, &at);
         return res;
@@ -538,7 +557,13 @@ async fn verify(
     let (parts, body) = res.into_parts();
     let bytes = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        // The body sent more than its size hint, or errored mid-stream. Its bytes are
+        // partly read, so answer 500 and report it.
+        Err(_) => {
+            let message = format!("{at}: body ended early, errored, or exceeded its exact size hint");
+            report(mode, &at, Violation::new("body_unreadable", message));
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
     let content_type = parts.headers.get(axum::http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
     match index.check_response_with(doc_method, path, parts.status, content_type, Some(&bytes), redact) {

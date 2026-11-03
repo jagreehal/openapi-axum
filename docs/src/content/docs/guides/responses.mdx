@@ -1,0 +1,41 @@
+---
+title: "Responses"
+description: "Response enums, headers and typed errors."
+---
+
+A response enum lists every status a handler can return. The same `#[status]` sets the status your client receives and the status in the docs.
+
+```rust
+use openapi_axum::{ApiResponse, HeaderText, InvalidHeaderText};
+use serde::Serialize;
+use utoipa::ToSchema;
+
+#[derive(Serialize, ToSchema)]
+struct Todo { id: u32 }
+
+#[derive(ApiResponse)]
+enum CreateTodo {
+    /// Created.
+    #[status(CREATED)]
+    Created {
+        #[header("Location")]
+        location: HeaderText,
+        #[body]
+        todo: Todo,
+    },
+    /// A todo with that title exists.
+    #[status(409)]
+    Conflict,
+}
+
+fn created(todo: Todo) -> Result<CreateTodo, InvalidHeaderText> {
+    let location = HeaderText::new(format!("/todos/{}", todo.id))?;
+    Ok(CreateTodo::Created { location, todo })
+}
+```
+
+`Location` goes out on every `Created` response and appears in the docs. Unit variants have no body. Generic enums work too.
+
+A `#[header]` field holds a `HeaderText` or an `http::HeaderValue`. Each is a valid header value once it exists, so sending the header can't fail. The `ResponseHeader` trait behind this is sealed, so no other implementation can break that. Convert your own types into a `HeaderText` where you build the response. `HeaderText::new` checks the text where you build it, and `HeaderText::from_static` takes a literal. A `String` field is a compile error, since a string can hold a newline. Header names are checked at compile time too.
+
+If you return `Result<_, E>`, `?` works with your domain errors through `From`. A handler can only produce the variants it has, so an undocumented status is a compile error.

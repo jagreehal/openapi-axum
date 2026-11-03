@@ -1,0 +1,17 @@
+---
+title: "How the document is built"
+description: "How handler signatures map to the OpenAPI document."
+---
+
+| In the handler | In the OpenAPI document |
+|---|---|
+| Return `Json<T>`, `Created<T>`, `Accepted<T>`, `NoContent` | `200`, `201`, `202`, `204` with `T`'s schema |
+| Return `Result<T, E>` | the responses of `T` and of `E` |
+| A `#[derive(ApiResponse)]` enum | one response per variant, using its `#[status]` |
+| `Path<u32>`, `Path<(String, u32)>`, `Path<SomeStruct>` | path parameters, named from the route template |
+| `Query<T>` | query parameters from `T`'s fields |
+| `Json<T>` or `Form<T>` argument | the request body (a `GET` form becomes query parameters) |
+| `///` doc comment | summary (first line) and description (the rest) |
+| `#[deprecated]`, the fn name | `deprecated`, `operationId` |
+
+Query and path structs can derive either `utoipa::IntoParams` or `utoipa::ToSchema`. You don't need `#[into_params(parameter_in = ...)]`: the extractor already says where the values come from.

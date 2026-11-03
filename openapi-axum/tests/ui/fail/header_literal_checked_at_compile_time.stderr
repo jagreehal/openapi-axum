@@ -1,0 +1,26 @@
+error[E0080]: evaluation panicked: HeaderValue::from_static with invalid bytes
+ --> tests/ui/fail/header_literal_checked_at_compile_time.rs:4:25
+  |
+4 | const BAD: HeaderText = HeaderText::from_static("bad\nvalue");
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `BAD` failed inside this call
+  |
+note: inside `HeaderText::from_static`
+ --> src/response.rs
+  |
+  |         Self(axum::http::HeaderValue::from_static(text))
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: inside `http::header::value::HeaderValue::from_static`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: $CARGO/http-$VERSION/src/header/value.rs
+  |
+  |                 panic!("HeaderValue::from_static with invalid bytes")
+  |                 ----------------------------------------------------- in this macro invocation
+
+note: erroneous constant encountered
+ --> tests/ui/fail/header_literal_checked_at_compile_time.rs:7:13
+  |
+7 |     let _ = BAD;
+  |             ^^^

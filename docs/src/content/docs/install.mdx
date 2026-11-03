@@ -1,0 +1,23 @@
+---
+title: "Install"
+description: "Add openapi-axum to an axum project."
+---
+
+```toml
+[dependencies]
+openapi-axum = { version = "0.4", features = ["uuid"] }
+axum = "0.8"
+utoipa = "6"
+serde = { version = "1", features = ["derive"] }
+```
+
+Your request and response types derive `utoipa::ToSchema`. openapi-axum uses utoipa for schemas and builds everything else.
+
+## Features
+
+| Feature | Default | Adds |
+|---|---|---|
+| `validation` | yes | request validation and `verify_responses` |
+| `tracing` | yes | a span per handler, named after its `operationId` |
+| `testing` | no | `openapi_axum::testing` |
+| `uuid`, `chrono` | no | `Path<Uuid>`, `Path<DateTime<_>>`, `Path<NaiveDate>` |

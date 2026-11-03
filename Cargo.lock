@@ -887,13 +887,14 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openapi-axum"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "chrono",
  "criterion",
  "dhat",
  "futures-util",
+ "http-body",
  "http-body-util",
  "jsonschema",
  "openapi-axum-macros",
@@ -913,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "openapi-axum-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",

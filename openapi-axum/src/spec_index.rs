@@ -26,6 +26,8 @@ pub(crate) struct BodySpec {
 struct ResponseSpec {
     /// documented content types -> body validator
     content: Vec<(String, jsonschema::Validator)>,
+    /// documented headers: lowercase name, schema, value validator
+    headers: Vec<(String, Value, jsonschema::Validator)>,
 }
 
 struct OperationSpec {
@@ -33,6 +35,17 @@ struct OperationSpec {
     /// content-type essence -> published body schema
     bodies: HashMap<String, BodySpec>,
     responses: HashMap<String, ResponseSpec>,
+}
+
+impl OperationSpec {
+    /// The documented response for `status`: exact, its class (`4XX`), or `default`.
+    fn response(&self, status: StatusCode) -> Option<&ResponseSpec> {
+        let class = format!("{}XX", status.as_u16() / 100);
+        self.responses
+            .get(status.as_str())
+            .or_else(|| self.responses.get(&class))
+            .or_else(|| self.responses.get("default"))
+    }
 }
 
 /// Why a response contradicts the document: a stable `reason` for metrics and a
@@ -330,9 +343,24 @@ impl SpecIndex {
                 .flatten()
                 .map(|(ct, media)| (ct.clone(), compile(root, media.get("schema").unwrap_or(&json!({})))))
                 .collect();
-            responses.insert(status.clone(), ResponseSpec { content });
+            let headers = r["headers"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(name, h)| {
+                    let schema = resolve(root, h)["schema"].clone();
+                    let validator = compile(root, &schema);
+                    (name.to_ascii_lowercase(), schema, validator)
+                })
+                .collect();
+            responses.insert(status.clone(), ResponseSpec { content, headers });
         }
         OperationSpec { params, bodies, responses }
+    }
+
+    /// Every documented `(method, path)`.
+    pub(crate) fn operation_keys(&self) -> impl Iterator<Item = &(Method, String)> {
+        self.ops.keys()
     }
 
     /// The documented operation registered under route `id`, if it's in the document.
@@ -413,22 +441,46 @@ impl SpecIndex {
         &self.root
     }
 
-    /// Check a response against the documented responses of its operation.
-    /// `Ok(())` for routes that aren't documented (e.g. `route_undocumented`).
-    #[cfg_attr(not(feature = "testing"), allow(dead_code))]
-    pub fn check_response(
+    /// Each documented response header that's present, against its schema. Values are
+    /// decoded the way OpenAPI serializes headers (`simple` style: arrays are
+    /// comma-separated; repeated header lines join into one list).
+    pub(crate) fn check_headers(
         &self,
         method: &Method,
         path: &str,
         status: StatusCode,
-        content_type: Option<&str>,
-        body: &[u8],
-    ) -> Result<(), String> {
-        self.check_response_with(method, path, status, content_type, Some(body), false).map_err(|v| v.message)
+        headers: &axum::http::HeaderMap,
+        redact: bool,
+    ) -> Result<(), Violation> {
+        let Some(documented) = self.op(method, path).and_then(|op| op.response(status)) else { return Ok(()) };
+        for (name, schema, validator) in &documented.headers {
+            let lines: Vec<&str> =
+                headers.get_all(name.as_str()).iter().map(|v| v.to_str().unwrap_or_default()).collect();
+            if lines.is_empty() {
+                continue;
+            }
+            let text = lines.join(", ");
+            let (ty, _) = primary_type(&self.root, schema);
+            let value = if ty == "array" {
+                let items: Vec<&str> = text.split(',').map(str::trim).collect();
+                coerce_styled(&self.root, schema, &[&items.join(",")], ArrayStyle::Delimited(','))
+            } else {
+                coerce(&self.root, schema, &[text.trim()])
+            };
+            if !validator.is_valid(&value) {
+                let shown = if redact { String::new() } else { format!(" ({text:?})") };
+                return Err(Violation::new(
+                    "header_mismatch",
+                    format!("{method} {path} -> {status}: header `{name}`{shown} doesn't match its schema"),
+                ));
+            }
+        }
+        Ok(())
     }
 
-    /// [`check_response`](Self::check_response). `body: None` checks only status and
-    /// content type (the body wasn't buffered). With `redact`, messages name where a
+    /// Check a response against the documented responses of its operation. `Ok(())`
+    /// for routes that aren't documented (e.g. `route_undocumented`). `body: None` checks
+    /// only status and content type (the body wasn't buffered). With `redact`, messages name where a
     /// body fails and which keyword, but never include body values (for logs).
     pub(crate) fn check_response_with(
         &self,
@@ -441,12 +493,8 @@ impl SpecIndex {
     ) -> Result<(), Violation> {
         let Some(op) = self.op(method, path) else { return Ok(()) };
         let label = format!("{method} {path} -> {status}");
-        let class = format!("{}XX", status.as_u16() / 100);
         let documented = op
-            .responses
-            .get(status.as_str())
-            .or_else(|| op.responses.get(&class))
-            .or_else(|| op.responses.get("default"))
+            .response(status)
             .ok_or_else(|| Violation::new("status_not_documented", format!("{label}: status is not documented")))?;
         let is_documented = |ct: &str| documented.content.iter().any(|(doc_ct, _)| essence(doc_ct) == essence(ct));
         // Body not buffered (streamed or over the limit): status and content type only.

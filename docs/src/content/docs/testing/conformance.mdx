@@ -1,0 +1,54 @@
+---
+title: "Conformance"
+description: "Test an app against its own published document with generated requests."
+---
+
+With the `testing` feature, one call sends each documented operation a request built from nothing but the document, then checks each response against the document.
+
+```rust
+#[tokio::test]
+async fn conforms_to_its_docs() {
+    let (router, openapi) = app();
+    openapi_axum::testing::assert_conforms(&router, &openapi).await;
+}
+```
+
+`assert_conforms` starts with one request per operation, built from the document. Then it generates more from the schemas:
+
+- **Valid variants**: other values, boundary values such as a `maximum` or `maxLength`, and optional params and fields. Each one must succeed the way the first request did.
+- **Invalid variants**: one path param, query param or JSON body broken at a time (out of range, too long, wrong type, a required field missing). Each one must get a 400, 415 or 422 that the document lists.
+
+The cases are deterministic, so a failure names the request and reproduces on every run:
+
+```text
+POST /tags (generated invalid request, body: `name`: longer than maxLength, value {"name":"aaaaaaaaaaa"}): answered 200 OK
+```
+
+It catches an extractor that needs something the docs leave out, a handler that accepts what the docs forbid, a serde rule stricter than the schema, and responses the docs don't list.
+
+The run returns a report. Print it to see what each operation exercised: the statuses it got, the documented statuses no request reached, and the inputs it couldn't vary.
+
+```text
+GET /codes/{code}: 1 valid, 1 invalid, statuses 200, 400
+  skipped valid variants: path parameter `code` uses its example only (a `pattern` can't be generated)
+GET /items/{id}: 9 valid, 3 invalid, statuses 400, 404; not exercised: 200
+GET /secret-header: 9 valid, 0 invalid, statuses 200; not exercised: 400
+  skipped invalid values: header parameter `x-api-key` isn't generated
+```
+
+Here no generated id exists, so `GET /items/{id}` never returned its `200`. Point the test at your data with `Conformance`:
+
+```rust
+let report = Conformance::new(&router, &openapi)
+    .credential("bearer", &token)
+    .fixture("id", 42)                                   // every param named `id`
+    .fixture_for("GET /users/{id}", "id", 7)             // one operation
+    .body_for("POST /todos", json!({ "title": "milk" })) // the docs-built body
+    .before_each(|| async { db.reset().await })          // same state for every request
+    .cases(16)
+    .run()
+    .await;
+assert!(report.get("GET /items/{id}").unwrap().not_exercised.is_empty(), "{report}");
+```
+
+Valid variants keep fixture values, so reads and writes hit real rows; invalid variants still break them. `.expect("GET /path", status)` requires a status for one operation and skips its generated cases. `.cases(0)` sends one request per operation.

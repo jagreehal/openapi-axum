@@ -1,0 +1,41 @@
+---
+title: openapi-axum
+description: "OpenAPI for axum, derived from your handler signatures and enforced at runtime."
+template: splash
+hero:
+  tagline: Write axum handlers. Get the OpenAPI document, request validation and a test harness from the same signatures.
+  actions:
+    - text: Get started
+      link: /openapi-axum/introduction/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/jagreehal/openapi-axum
+      icon: external
+      variant: minimal
+pagefind: false
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```rust
+#[route(GET, "/todos/{id}", tag = "Todos")]
+/// Get a todo.
+async fn get_todo(Path(id): Path<u32>) -> Result<Json<Todo>, ApiError> {
+    // ...
+}
+```
+
+<CardGrid>
+  <Card title="One signature" icon="document">
+    Path, query, body, responses and doc comments become the OpenAPI operation. You write each endpoint once.
+  </Card>
+  <Card title="Checked at compile time" icon="approve-check">
+    A handler can only return the statuses and bodies its type allows, so the docs list every response it sends.
+  </Card>
+  <Card title="Validated at runtime" icon="seti:json">
+    Bodies, query and path values get checked against the published schemas before your handler runs.
+  </Card>
+  <Card title="Tested from the docs" icon="rocket">
+    `assert_conforms` generates valid and invalid requests from the document and checks every response.
+  </Card>
+</CardGrid>

@@ -1,0 +1,60 @@
+---
+title: "Introduction"
+description: "What openapi-axum does: one handler signature gives you routing, OpenAPI docs and request validation."
+---
+
+You write ordinary axum handlers. openapi-axum reads their signatures and builds the OpenAPI document from them. At runtime it checks requests against that same document.
+
+You declare each endpoint once. For typed handlers the response docs come from the return type, so returning a body or status the docs don't list is a compile error. Custom extractors, middleware and `#[raw]` arguments can still behave in ways the document doesn't describe. For those, openapi-axum gives you runtime checks and a test harness to catch the mismatch.
+
+```rust
+use axum::{Json, extract::{Path, State}};
+use openapi_axum::{ApiResponse, ApiRouter, Rejection, route, routes};
+use serde::Serialize;
+use utoipa::ToSchema;
+
+#[derive(Serialize, ToSchema)]
+struct Todo {
+    id: u32,
+    title: String,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ErrorBody {
+    message: String,
+}
+
+#[derive(ApiResponse)]
+enum ApiError {
+    /// The request was invalid.
+    #[status(BAD_REQUEST)]
+    BadRequest(ErrorBody),
+    /// No todo with that id.
+    #[status(NOT_FOUND)]
+    NotFound(ErrorBody),
+}
+
+// Malformed JSON, query strings and paths arrive here, in your error shape.
+impl From<Rejection> for ApiError {
+    fn from(r: Rejection) -> Self {
+        Self::BadRequest(ErrorBody { message: r.message })
+    }
+}
+
+#[route(GET, "/todos/{id}", tag = "Todos")]
+/// Get a todo.
+async fn get_todo(State(prefix): State<String>, Path(id): Path<u32>) -> Result<Json<Todo>, ApiError> {
+    match id {
+        1 => Ok(Json(Todo { id, title: format!("{prefix} one") })),
+        _ => Err(ApiError::NotFound(ErrorBody { message: "no such todo".into() })),
+    }
+}
+
+let (router, openapi) = ApiRouter::new()
+    .routes(routes![get_todo])
+    .spec_route("/openapi.json")
+    .with_state("todo".to_string())
+    .split();
+```
+
+`router` is a plain `axum::Router`. `openapi` describes `GET /todos/{id}` with an integer `id` path parameter, a `200` returning `Todo`, and `400` and `404` returning `ErrorBody`, each with the description from its doc comment. You didn't write any of that a second time.

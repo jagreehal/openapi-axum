@@ -1,0 +1,35 @@
+---
+title: "What gets checked"
+description: "Which mismatches fail at compile time, at startup, at runtime or in a test."
+---
+
+Each guarantee has a test in the repository: compile errors in `tests/ui/fail`, the rest in `tests/`.
+
+These fail at compile time:
+
+- a body type or status the handler's return type doesn't allow,
+- a tuple path extractor whose length doesn't match the template,
+- duplicate statuses in a response enum, or a body on a `204`,
+- a `#[header]` field whose type isn't a valid header value by construction (a `String`, say), an invalid header name, or an invalid literal in `HeaderText::from_static`,
+- extractors that can reject a request in a handler that has no error type to put the rejection in.
+
+These fail when the router is built, at startup or in your first test:
+
+- a path struct whose fields don't match the template,
+- one name used for two different schemas or security schemes,
+- the same method and path registered twice,
+- a `$ref` that doesn't resolve.
+
+These get checked at runtime, on each request or response:
+
+- request bodies, query and path values against the published schemas,
+- with `verify_responses`, statuses, content types and bounded bodies, including what middleware sends.
+
+These need a test, using [`assert_conforms`](/openapi-axum/testing/conformance/):
+
+- an `ExtractorDoc` that leaves out a header, credential or response its extractor needs, or promises constraints its extractor doesn't enforce,
+- a schema that serde can't satisfy, such as a custom deserializer stricter than the type's schema.
+
+The document can still describe less than your code does in one place. A custom deserializer that accepts more than its type's schema gets rejected by validation until you describe it with `#[schema(schema_with = ...)]`.
+
+To catch breaking changes between releases, commit your generated document and run a diff tool such as [oasdiff](https://github.com/oasdiff/oasdiff) on it in CI. That answers a different question from the checks above: whether the new document still works for clients that use the old one. The [CI guide](/openapi-axum/guides/ci/) has a workflow you can copy, and the [Schemathesis recipe](/openapi-axum/testing/schemathesis/) adds random and stateful testing over HTTP.
