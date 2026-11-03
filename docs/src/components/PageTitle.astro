@@ -26,9 +26,9 @@ import Default from '@astrojs/starlight/components/PageTitle.astro';
 <style>
   .page-title-row {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
+    gap: 0.75rem;
   }
 
   .copy-markdown-btn {
@@ -46,7 +46,6 @@ import Default from '@astrojs/starlight/components/PageTitle.astro';
     white-space: nowrap;
     transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
     flex-shrink: 0;
-    margin-top: 0.25rem;
     user-select: none;
     -webkit-user-select: none;
   }

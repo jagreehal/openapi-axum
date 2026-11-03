@@ -16,6 +16,7 @@ export default defineConfig({
         PageTitle: './src/components/PageTitle.astro',
         ThemeProvider: './src/components/ThemeProvider.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
+        Hero: './src/components/SplashHero.astro',
       },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/jagreehal/openapi-axum' },

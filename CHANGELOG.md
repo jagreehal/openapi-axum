@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs site: a landing page, highlighted code in both themes, 16px article text, and plain previous/next links.
+
 ## 0.4.0
 
 - `assert_conforms` generates requests from the schemas: valid variants must succeed, and invalid ones must get a documented 400, 415 or 422. Set the count with `Conformance::cases(n)`.

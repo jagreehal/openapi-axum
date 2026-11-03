@@ -1,0 +1,301 @@
+---
+import { Code } from 'astro:components';
+import { codeThemes } from '../../lib/code-themes';
+
+const items = [
+  {
+    label: '01',
+    name: '#[route]',
+    title: 'Document the handler',
+    blurb:
+      'Path, query, body and responses come from the signature. Doc comments become the summary and description.',
+    code: `#[route(POST, "/todos")]
+/// Create a todo.
+async fn create(
+    Json(new): Json<NewTodo>,
+) -> Result<Created<Todo>, ApiError> {
+    Ok(Created(insert(new)?))
+}`,
+  },
+  {
+    label: '02',
+    name: 'ApiResponse',
+    title: 'Type every status',
+    blurb:
+      'Each variant is a documented status. A handler can only return what its type lists.',
+    code: `#[derive(ApiResponse)]
+enum ApiError {
+    /// The request was invalid.
+    #[status(BAD_REQUEST)]
+    BadRequest(ErrorBody),
+    /// No todo with that id.
+    #[status(NOT_FOUND)]
+    NotFound(ErrorBody),
+}`,
+  },
+  {
+    label: '03',
+    name: 'assert_conforms',
+    title: 'Test against the docs',
+    blurb:
+      'Generated valid and invalid requests for every operation, each response checked against the document.',
+    code: `#[tokio::test]
+async fn conforms() {
+    let (app, doc) = api().split();
+    let report =
+        assert_conforms(&app, &doc)
+            .await;
+    println!("{report}");
+}`,
+  },
+];
+---
+
+<section class="primitives" aria-labelledby="primitives-title">
+  <div class="primitives__inner">
+    <header class="primitives__head">
+      <p class="primitives__eyebrow">Three pieces</p>
+      <h2 id="primitives-title" class="primitives__title">
+        Write the handler. The document follows.
+      </h2>
+    </header>
+
+    <div class="primitives__grid sl-markdown-no-margin">
+      {
+        items.map((it) => (
+          <article class="card">
+            <div class="card__top">
+              <div class="card__head">
+                <span class="card__index" aria-hidden="true">{it.label}</span>
+                <code class="card__name">{it.name}</code>
+              </div>
+              <h3 class="card__title">{it.title}</h3>
+              <p class="card__blurb">{it.blurb}</p>
+            </div>
+            <div class="card__body">
+              <Code class="card__code" code={it.code} lang="rust" themes={codeThemes} defaultColor={false} />
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .primitives {
+    border-top: 1px solid var(--color-charcoal-grey);
+    padding-block: var(--section-pad, clamp(3rem, 6vw, 5rem));
+  }
+
+  :root[data-theme='light'] .primitives {
+    border-top-color: var(--sl-color-gray-5);
+  }
+
+  .primitives__inner {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+  }
+
+  .primitives__head {
+    margin-bottom: 3rem;
+    max-width: 48rem;
+  }
+
+  .primitives__eyebrow {
+    margin: 0 0 0.5rem;
+    font-family: var(--sl-font);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--color-storm-cloud);
+    font-weight: 510;
+  }
+
+  .primitives__title {
+    margin: 0;
+    font-family: var(--sl-font);
+    font-size: clamp(1.5rem, 3vw, 2.125rem);
+    line-height: 1.18;
+    letter-spacing: -0.02em;
+    color: var(--color-porcelain);
+    font-weight: 590;
+    border: 0;
+  }
+
+  :root[data-theme='light'] .primitives__title {
+    color: var(--color-pitch-black);
+  }
+  .primitives__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+    /* Row 1 = tallest copy block across columns; row 2 = shared remainder (code). */
+    grid-template-rows: auto 1fr;
+    grid-auto-rows: auto 1fr;
+    gap: 1px;
+    background: var(--color-charcoal-grey);
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  :root[data-theme='light'] .primitives__grid {
+    background: var(--sl-color-gray-5);
+    border-color: var(--sl-color-gray-5);
+  }
+
+  .card {
+    background: var(--color-graphite);
+    padding: 1.5rem 1.5rem 1.625rem;
+    min-width: 0;
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 2;
+    transition: background var(--sl-transition);
+  }
+
+  :root[data-theme='light'] .card {
+    background: #ffffff;
+  }
+
+  .card:hover {
+    background: var(--color-deep-slate);
+  }
+
+  :root[data-theme='light'] .card:hover {
+    background: var(--sl-color-gray-6);
+  }
+
+  .card__top {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+    min-width: 0;
+  }
+
+  .card__body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  @supports not (grid-template-rows: subgrid) {
+    .primitives__grid {
+      grid-template-rows: none;
+      grid-auto-rows: auto;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      grid-row: auto;
+    }
+
+    .card__top {
+      flex: 0 0 auto;
+    }
+
+    .card__body {
+      flex: 1 1 auto;
+    }
+  }
+
+  .card__head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.625rem;
+  }
+
+  .card__index {
+    font-family: var(--sl-font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-fog-grey);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :root[data-theme='light'] .card__index {
+    color: var(--sl-color-gray-3);
+  }
+
+  .card__name {
+    font-family: var(--sl-font-mono);
+    font-size: 0.875rem;
+    color: var(--color-light-steel);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    letter-spacing: -0.005em;
+    font-weight: 400;
+  }
+
+  :root[data-theme='light'] .card__name {
+    color: var(--sl-color-gray-2);
+  }
+
+  .card__title {
+    margin: 0;
+    font-family: var(--sl-font);
+    font-size: 1.0625rem;
+    font-weight: 590;
+    letter-spacing: -0.013em;
+    color: var(--color-porcelain);
+    border: 0;
+    line-height: 1.3;
+  }
+
+  :root[data-theme='light'] .card__title {
+    color: var(--color-pitch-black);
+  }
+
+  .card__blurb {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-light-steel);
+    letter-spacing: -0.011em;
+  }
+
+  :root[data-theme='light'] .card__blurb {
+    color: var(--sl-color-gray-2);
+  }
+
+  .card__code {
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.875rem 1rem;
+    background: var(--color-pitch-black);
+    border: 1px solid var(--color-charcoal-grey);
+    border-radius: 6px;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    font-family: var(--sl-font-mono);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--color-light-steel);
+    letter-spacing: -0.005em;
+  }
+
+  :root[data-theme='light'] .card__code {
+    background: var(--sl-color-bg-inline-code);
+    border-color: var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+  }
+
+  .card__code code {
+    display: block;
+    min-width: min-content;
+    background: transparent;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+  }
+</style>
