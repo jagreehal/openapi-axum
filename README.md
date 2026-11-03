@@ -125,7 +125,7 @@ fn created(todo: Todo) -> Result<CreateTodo, InvalidHeaderText> {
 
 `Location` goes out on every `Created` response and appears in the docs. Unit variants have no body. Generic enums work too.
 
-A `#[header]` field holds a `HeaderText` (or `http::HeaderValue`, or your own type implementing `ResponseHeader`). Each of those is a valid header value once it exists, so sending the header can't fail. `HeaderText::new` checks the text where you build it, and `HeaderText::from_static` takes a literal. A `String` field is a compile error, since a string can hold a newline. Header names are checked at compile time too.
+A `#[header]` field holds a `HeaderText` or an `http::HeaderValue`. Each is a valid header value once it exists, so sending the header can't fail. The `ResponseHeader` trait behind this is sealed, so no other implementation can break that. Convert your own types into a `HeaderText` where you build the response. `HeaderText::new` checks the text where you build it, and `HeaderText::from_static` takes a literal. A `String` field is a compile error, since a string can hold a newline. Header names are checked at compile time too.
 
 If you return `Result<_, E>`, `?` works with your domain errors through `From`. A handler can only produce the variants it has, so an undocumented status is a compile error.
 
@@ -184,7 +184,9 @@ async fn conforms_to_its_docs() {
 - It checks the body against its schema when the body has a known length of at most 1 MiB. Change the limit with `.verify_body_limit(bytes)`.
 - It buffers a body only when it's eligible for that check. Streams (unknown length, `text/event-stream`) and bodies over the limit pass through with no buffering and no schema validation. Each skip is reported as a `tracing` event with its reason, so you can see how much traffic had its body checked.
 
-Use `Panic` in tests and `Log` to sample production traffic. `Log` reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
+The mode decides what happens when a check fails. `Panic` fails the test that caused it. `Log` records the failure and sends the response unchanged; it reports where a body fails and which rule, and leaves the values out of the message, since they may be user data.
+
+To control the cost, `.verify_sample_every(n)` checks the body of one in every `n` responses. Status and content type are still checked on every response, since they need no buffering. Unsampled bodies are reported as `skipped` with reason `not_sampled`.
 
 ## What gets checked, and when
 
@@ -235,13 +237,13 @@ Handlers stay ordinary async functions, so a unit test can call `get_todo(State(
 
 ## Cost
 
-These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 6 µs to a 1 KB nested one, 52 to 81% more than plain axum on these small workloads. Most of that is the intermediate `serde_json::Value` the validator checks, not the validator. `verify_responses` adds about 1.5 µs and 10.5 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
+These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. Request validation adds about 1 µs to a small JSON request and about 6 µs to a 1 KB nested one, 52 to 81% more than plain axum on these small workloads. For the nested payload, parsing into an intermediate `serde_json::Value` and converting it into your type accounts for about 79% of that, and the schema check for about 21%. `verify_responses` adds about 1.5 µs and 10.5 µs more. In a real service, network, database and handler work tend to outweigh this. [BENCHMARKS.md](BENCHMARKS.md) has allocation counts, the method, its limits, and how to run it yourself.
 
 ### Choosing what to turn on
 
 - **Request validation** is on by default. It's a crate feature, so it applies to the whole build. To skip body validation for one argument, mark it `#[raw]`; that argument then keeps axum's own rejection. Measure before you turn validation off for performance.
 - **In tests and CI**, add `verify_responses(VerifyMode::Panic)` and `assert_conforms`.
-- **In production**, decide on `verify_responses` per workload. `VerifyMode::Log` with a body limit suits sampling, and its `tracing` events show what it checked and skipped.
+- **In production**, decide on `verify_responses` per workload. Use `VerifyMode::Log`, a body limit and `verify_sample_every(n)` to bound the cost. Its `tracing` events show what it checked and skipped.
 
 ## Features
 

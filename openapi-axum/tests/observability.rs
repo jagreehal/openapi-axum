@@ -112,3 +112,53 @@ async fn failures_report_a_reason_without_values() {
     let wrong_type = events_for("valid", Some("application/xml")).await;
     assert_eq!(only(&wrong_type), ("openapi.response_validation.failed", "content_type_not_documented"));
 }
+
+async fn run_sampled(every: u32, requests: usize, kind: &str, teapot: bool) -> Vec<(String, String, String)> {
+    let captured = Captured::default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(captured.clone()));
+    let router = ApiRouter::new()
+        .routes(routes![ok])
+        .layer(axum::middleware::from_fn(rewrite))
+        .layer(axum::middleware::from_fn(teapot_layer))
+        .verify_responses(VerifyMode::Log)
+        .verify_sample_every(every)
+        .split()
+        .0;
+    for _ in 0..requests {
+        let mut req = Request::get("/ok").header("x-body", kind);
+        if teapot {
+            req = req.header("x-teapot", "1");
+        }
+        let res = router.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        let _ = http_body_util::BodyExt::collect(res.into_body()).await.unwrap();
+    }
+    captured.0.lock().unwrap().clone()
+}
+
+/// Answers 418 (undocumented) when `x-teapot` is set.
+async fn teapot_layer(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    if req.headers().contains_key("x-teapot") {
+        let mut res = axum::response::IntoResponse::into_response(axum::http::StatusCode::IM_A_TEAPOT);
+        *res.body_mut() = Body::empty();
+        return res;
+    }
+    next.run(req).await
+}
+
+fn count(events: &[(String, String, String)], event: &str, reason: &str) -> usize {
+    events.iter().filter(|(e, r, _)| e == event && r == reason).count()
+}
+
+#[tokio::test]
+async fn sampling_checks_one_body_in_every_n() {
+    let events = run_sampled(3, 9, "invalid", false).await;
+    assert_eq!(count(&events, "openapi.response_validation.failed", "schema_mismatch"), 3, "{events:?}");
+    assert_eq!(count(&events, "openapi.response_validation.skipped", "not_sampled"), 6, "{events:?}");
+}
+
+#[tokio::test]
+async fn sampling_never_skips_status_and_content_type_checks() {
+    // Every response is checked for an undocumented status, sampled or not.
+    let events = run_sampled(1000, 5, "valid", true).await;
+    assert_eq!(count(&events, "openapi.response_validation.failed", "status_not_documented"), 5, "{events:?}");
+}

@@ -177,18 +177,30 @@ impl ToSchema for HeaderText {
     }
 }
 
-/// A type a `#[derive(ApiResponse)]` `#[header("...")]` field can hold.
+mod sealed {
+    #[diagnostic::on_unimplemented(
+        message = "`ResponseHeader` is sealed: `{Self}` can't implement it",
+        label = "only `HeaderText` and `http::HeaderValue` are response headers",
+        note = "convert your type into a `HeaderText` where you build the response, e.g. `impl From<{Self}> for HeaderText` or `HeaderText::new(...)?`"
+    )]
+    pub trait Sealed {}
+    impl Sealed for super::HeaderText {}
+    impl Sealed for axum::http::HeaderValue {}
+}
+
+/// A type a `#[derive(ApiResponse)]` `#[header("...")]` field can hold: [`HeaderText`]
+/// or `http::HeaderValue`.
 ///
-/// The conversion is infallible: a value of this type is a valid header value by
-/// construction, so sending the header can't fail at response time. Implemented for
-/// [`HeaderText`] and `http::HeaderValue`. Implement it for your own types (an `ETag`
-/// newtype, say) by converting from a value you've already validated.
+/// Both are valid header values once they exist, so sending the header can't fail at
+/// response time. The trait is sealed so that guarantee holds: no implementation can
+/// panic or misbehave at send time. For your own types (an `ETag` newtype, say), convert
+/// into a `HeaderText` where you build the response, e.g. with `impl From<ETag> for HeaderText`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be a response header",
     label = "`#[header]` fields need a type that is a valid header value by construction",
-    note = "use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static(\"...\")`), `http::HeaderValue`, or implement `openapi_axum::ResponseHeader`"
+    note = "use `openapi_axum::HeaderText` (build it with `HeaderText::new(s)?` or `HeaderText::from_static(\"...\")`) or `http::HeaderValue`; convert your own types into one of those where you build the response"
 )]
-pub trait ResponseHeader {
+pub trait ResponseHeader: sealed::Sealed {
     fn to_header_value(&self) -> axum::http::HeaderValue;
     /// The schema documented for this header.
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
