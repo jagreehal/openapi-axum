@@ -2,7 +2,7 @@
 //! `openapi_axum::verify`) with a stable `reason`, so you can tell how much traffic
 //! had its body checked, and how much failed.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Mutex, Once, PoisonError};
 
 use axum::Json;
 use axum::body::Body;
@@ -12,8 +12,12 @@ use tower::ServiceExt;
 use tracing::field::{Field, Visit};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 
-#[derive(Default, Clone)]
-struct Captured(Arc<Mutex<Vec<(String, String, String)>>>);
+/// One subscriber for the whole binary, installed once. Per-test scoped subscribers
+/// race on tracing's global callsite cache, so tests share this log and take turns.
+static EVENTS: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
+static SERIAL: Mutex<()> = Mutex::new(());
+
+struct Captured;
 
 struct Fields(Vec<(String, String)>);
 
@@ -35,7 +39,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Captured {
         event.record(&mut f);
         let get = |k: &str| f.0.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
         let message = format!("{} {}", get("message"), get("operation"));
-        self.0.lock().unwrap().push((get("event"), get("reason"), message));
+        EVENTS.lock().unwrap_or_else(PoisonError::into_inner).push((get("event"), get("reason"), message));
     }
 }
 
@@ -65,8 +69,6 @@ async fn rewrite(req: axum::extract::Request, next: axum::middleware::Next) -> a
 }
 
 async fn events_for(kind: &str, ct: Option<&str>) -> Vec<(String, String, String)> {
-    let captured = Captured::default();
-    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(captured.clone()));
     let router = ApiRouter::new()
         .routes(routes![ok])
         .layer(axum::middleware::from_fn(rewrite))
@@ -78,9 +80,12 @@ async fn events_for(kind: &str, ct: Option<&str>) -> Vec<(String, String, String
     if let Some(ct) = ct {
         req = req.header("x-ct", ct);
     }
-    let res = router.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
-    let _ = http_body_util::BodyExt::collect(res.into_body()).await.unwrap();
-    captured.0.lock().unwrap().clone()
+    capture(async move {
+        let res = router.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        let _ = http_body_util::BodyExt::collect(res.into_body()).await.unwrap();
+    })
+    .await
+    .1
 }
 
 fn only(events: &[(String, String, String)]) -> (&str, &str) {
@@ -114,8 +119,6 @@ async fn failures_report_a_reason_without_values() {
 }
 
 async fn run_sampled(every: u32, requests: usize, kind: &str, teapot: bool) -> Vec<(String, String, String)> {
-    let captured = Captured::default();
-    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(captured.clone()));
     let router = ApiRouter::new()
         .routes(routes![ok])
         .layer(axum::middleware::from_fn(rewrite))
@@ -124,15 +127,18 @@ async fn run_sampled(every: u32, requests: usize, kind: &str, teapot: bool) -> V
         .verify_sample_every(every)
         .split()
         .0;
-    for _ in 0..requests {
-        let mut req = Request::get("/ok").header("x-body", kind);
-        if teapot {
-            req = req.header("x-teapot", "1");
+    capture(async move {
+        for _ in 0..requests {
+            let mut req = Request::get("/ok").header("x-body", kind);
+            if teapot {
+                req = req.header("x-teapot", "1");
+            }
+            let res = router.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+            let _ = http_body_util::BodyExt::collect(res.into_body()).await.unwrap();
         }
-        let res = router.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
-        let _ = http_body_util::BodyExt::collect(res.into_body()).await.unwrap();
-    }
-    captured.0.lock().unwrap().clone()
+    })
+    .await
+    .1
 }
 
 /// Answers 418 (undocumented) when `x-teapot` is set.
@@ -168,12 +174,17 @@ async fn other() -> Json<u8> {
     Json(2)
 }
 
-/// Run `f` with events captured, on any runtime thread.
+/// Run `f` and return the events it emitted, on any runtime thread.
+#[allow(clippy::await_holding_lock)] // `SERIAL` makes the tests that read `EVENTS` take turns.
 async fn capture<F: std::future::Future>(f: F) -> (F::Output, Vec<(String, String, String)>) {
-    use tracing::instrument::WithSubscriber;
-    let captured = Captured::default();
-    let out = f.with_subscriber(tracing_subscriber::registry().with(captured.clone())).await;
-    let events = captured.0.lock().unwrap().clone();
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Captured)).unwrap();
+    });
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    EVENTS.lock().unwrap_or_else(PoisonError::into_inner).clear();
+    let out = f.await;
+    let events = std::mem::take(&mut *EVENTS.lock().unwrap_or_else(PoisonError::into_inner));
     (out, events)
 }
 
@@ -227,9 +238,8 @@ async fn sampling_is_exact_under_concurrency() {
     let ((), events) = capture(async {
         let tasks: Vec<_> = (0..200)
             .map(|_| {
-                use tracing::instrument::WithSubscriber;
                 let router = router.clone();
-                tokio::spawn(async move { get(&router, "/ok", None).await }.with_current_subscriber())
+                tokio::spawn(async move { get(&router, "/ok", None).await })
             })
             .collect();
         for t in tasks {
@@ -278,14 +288,17 @@ async fn bodies_pass_through_byte_for_byte() {
     let cases: [(&str, &[u8]); 4] =
         [("valid", b"7"), ("invalid", b"\"secret-value\""), ("large", large.as_bytes()), ("stream", b"1")];
     // n = 2: each kind is sent twice, once checked and once not sampled.
-    for (kind, want) in cases {
-        let router = rewriting_router(2);
-        for _ in 0..2 {
-            let (status, body) = get(&router, "/ok", Some(kind)).await;
-            assert_eq!(status, 200, "{kind}");
-            assert_eq!(body, want, "{kind}: body changed by verification");
+    capture(async {
+        for (kind, want) in cases {
+            let router = rewriting_router(2);
+            for _ in 0..2 {
+                let (status, body) = get(&router, "/ok", Some(kind)).await;
+                assert_eq!(status, 200, "{kind}");
+                assert_eq!(body, want, "{kind}: body changed by verification");
+            }
         }
-    }
+    })
+    .await;
 }
 
 /// Claims an exact length of 1 byte, then sends `len` bytes.
