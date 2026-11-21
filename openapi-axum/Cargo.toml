@@ -21,6 +21,8 @@ validation = ["dep:jsonschema"]
 testing = ["validation", "dep:tower", "dep:http-body-util"]
 ## Wrap each handler in a span named after its operationId (nests under any server span).
 tracing = ["dep:tracing"]
+## `Multipart<T>` request bodies with `FilePart` file fields (validated like forms).
+multipart = ["validation", "axum/multipart"]
 ## `Path<Uuid>` support.
 uuid = ["dep:uuid", "utoipa/uuid"]
 ## `Path<DateTime<_>>` / `Path<NaiveDate>` support.
@@ -77,6 +79,10 @@ required-features = ["validation", "testing"]
 [[test]]
 name = "serde_compat"
 required-features = ["validation", "testing"]
+
+[[test]]
+name = "multipart"
+required-features = ["multipart", "testing"]
 
 [[test]]
 name = "observability"

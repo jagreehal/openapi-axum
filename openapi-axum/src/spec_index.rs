@@ -203,6 +203,54 @@ fn find_property<'a>(root: &'a Value, schema: &'a Value, name: &str) -> Option<&
         .find_map(|part| find_property(root, part, name))
 }
 
+#[cfg(any(feature = "multipart", feature = "testing"))]
+/// How a multipart body carries property `name` of `object_schema`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PartKind {
+    /// UTF-8 text parts, coerced like form values.
+    Text,
+    /// One file part: a binary string (`format: binary` or a `contentMediaType`).
+    File,
+    /// Repeated file parts: an array of binary strings.
+    Files,
+}
+
+#[cfg(any(feature = "multipart", feature = "testing"))]
+pub(crate) fn part_kind(root: &Value, object_schema: &Value, name: &str) -> PartKind {
+    let binary = |schema: &Value| {
+        let (ty, schema) = primary_type(root, schema);
+        ty == "string" && (schema["format"] == "binary" || schema.get("contentMediaType").is_some())
+    };
+    let Some(prop) = find_property(root, object_schema, name) else { return PartKind::Text };
+    let (ty, schema) = primary_type(root, prop);
+    if ty == "array" {
+        return if binary(&schema["items"]) { PartKind::Files } else { PartKind::Text };
+    }
+    if binary(schema) { PartKind::File } else { PartKind::Text }
+}
+
+#[cfg(any(feature = "multipart", feature = "testing"))]
+/// The JSON a multipart body is validated as: text parts coerced like a form, each file
+/// part as `""` (a string, so `format: binary` holds), repeated file parts as an array.
+/// `files` holds each file field's name and part count.
+pub(crate) fn multipart_instance(
+    root: &Value,
+    object_schema: &Value,
+    text: &[(String, String)],
+    files: &[(String, usize)],
+) -> Value {
+    let mut out = coerce_object(root, object_schema, text);
+    let object = out.as_object_mut().expect("coerce_object returns an object");
+    for (name, count) in files {
+        let value = match (part_kind(root, object_schema, name), count) {
+            (PartKind::File, 1) => json!(""),
+            _ => Value::Array(vec![json!(""); *count]),
+        };
+        object.insert(name.clone(), value);
+    }
+    out
+}
+
 /// Coerce urlencoded pairs into a JSON object according to an object schema.
 pub(crate) fn coerce_object(root: &Value, object_schema: &Value, pairs: &[(String, String)]) -> Value {
     let mut grouped: Vec<(&str, Vec<&str>)> = Vec::new();

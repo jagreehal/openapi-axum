@@ -11,6 +11,7 @@ description: "How handler signatures map to the OpenAPI document."
 | `Path<u32>`, `Path<(String, u32)>`, `Path<SomeStruct>` | path parameters, named from the route template |
 | `Query<T>` | query parameters from `T`'s fields |
 | `Json<T>` or `Form<T>` argument | the request body (a `GET` form becomes query parameters) |
+| `Multipart<T>` argument (feature `multipart`) | a `multipart/form-data` body; `FilePart` fields are files |
 | `///` doc comment | summary (first line) and description (the rest) |
 | `#[deprecated]`, the fn name | `deprecated`, `operationId` |
 

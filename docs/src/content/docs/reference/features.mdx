@@ -10,6 +10,7 @@ description: "Crate features and known limits."
 | `validation` | yes | request validation and `verify_responses` |
 | `tracing` | yes | a span per handler, named after its `operationId` |
 | `testing` | no | `openapi_axum::testing` |
+| `multipart` | no | `Multipart<T>` bodies with `FilePart` fields (turns on `validation`) |
 | `uuid`, `chrono` | no | `Path<Uuid>`, `Path<DateTime<_>>`, `Path<NaiveDate>` |
 
 ## Limits

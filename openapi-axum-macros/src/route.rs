@@ -70,13 +70,14 @@ fn template_params(path: &LitStr) -> syn::Result<Vec<String>> {
     Ok(names)
 }
 
-/// `Json<T>` -> ("Json", T) for axum's own extractors: a bare name (`Json<T>`) or an
-/// `axum::` path. Anything else (e.g. `axum_extra::extract::Query`) is a custom
-/// extractor, documented through `ExtractorDoc` and keeping its own rejection.
+/// `Json<T>` -> ("Json", T) for axum's own extractors and openapi-axum's `Multipart<T>`:
+/// a bare name (`Json<T>`) or an `axum::` / `openapi_axum::` path. Anything else (e.g.
+/// `axum_extra::extract::Query`) is a custom extractor, documented through
+/// `ExtractorDoc` and keeping its own rejection.
 fn extractor(ty: &Type) -> Option<(String, &Type)> {
     let Type::Path(tp) = ty else { return None };
     let segments = &tp.path.segments;
-    if tp.qself.is_some() || (segments.len() > 1 && segments[0].ident != "axum") {
+    if tp.qself.is_some() || (segments.len() > 1 && !["axum", "openapi_axum"].iter().any(|k| segments[0].ident == k)) {
         return None;
     }
     let seg = segments.last()?;
@@ -152,12 +153,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     query_args.push(i);
                     Some((format_ident!("FormRejection"), false, inner.clone()))
                 }
-                "Json" | "Form" => {
+                "Json" | "Form" | "Multipart" => {
                     bodies += 1;
                     if bodies > 1 {
-                        return Err(Error::new(ty.span(), "only one body extractor (Json/Form) per handler"));
+                        return Err(Error::new(ty.span(), "only one body extractor (Json/Form/Multipart) per handler"));
                     }
-                    let method = if kind == "Json" { quote!(json_body) } else { quote!(form_body) };
+                    let method = match kind.as_str() {
+                        "Json" => quote!(json_body),
+                        "Form" => quote!(form_body),
+                        _ => quote!(multipart_body),
+                    };
                     docs.push(quote_spanned!(ty.span()=> ctx.#method::<#inner>(&mut op);));
                     Some((format_ident!("{kind}Rejection"), true, inner.clone()))
                 }
@@ -227,6 +232,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 unwraps.push(quote_spanned! {ty.span()=>
                     let #arg = match #arg {
                         ::core::result::Result::Ok(v) => #private::axum::Json(v.0),
+                        ::core::result::Result::Err(e) => #reject,
+                    };
+                });
+            }
+            // `openapi_axum::Multipart` validates itself and rejects with `Rejection`.
+            Some((rej, true, _)) if rej == "MultipartRejection" => {
+                params.push(quote!(#arg: ::core::result::Result<#ty, #krate::Rejection>));
+                unwraps.push(quote_spanned! {ty.span()=>
+                    let #arg = match #arg {
+                        ::core::result::Result::Ok(v) => v,
                         ::core::result::Result::Err(e) => #reject,
                     };
                 });

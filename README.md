@@ -86,6 +86,7 @@ Your request and response types derive `utoipa::ToSchema`. openapi-axum uses uto
 | `Path<u32>`, `Path<(String, u32)>`, `Path<SomeStruct>` | path parameters, named from the route template |
 | `Query<T>` | query parameters from `T`'s fields |
 | `Json<T>` or `Form<T>` argument | the request body (a `GET` form becomes query parameters) |
+| `Multipart<T>` argument (feature `multipart`) | a `multipart/form-data` body; `FilePart` fields are files |
 | `///` doc comment | summary (first line) and description (the rest) |
 | `#[deprecated]`, the fn name | `deprecated`, `operationId` |
 
@@ -135,12 +136,34 @@ If you return `Result<_, E>`, `?` works with your domain errors through `From`. 
 
 openapi-axum validates input against the published document before your handler runs:
 
-- JSON and form bodies against their schema,
+- JSON, form and multipart bodies against their schema,
 - query and path values against their parameter schemas.
 
 So `#[schema(min_length = 1, maximum = 100)]`, `format = "uuid"`, enums and patterns hold at runtime too. A failed check reaches your error type as a `Rejection` with a message such as ``query parameter `limit`: 500 is greater than the maximum of 100``. Changes you make with `map_openapi` apply to validation as well.
 
 To turn it off, leave out the `validation` feature.
+
+## File uploads
+
+With the `multipart` feature, take a `Multipart<T>` argument the way you'd take `Json<T>`. `T` derives `Deserialize` and `ToSchema`, and its `FilePart` fields (`Option<FilePart>`, `Vec<FilePart>` too) are file parts:
+
+```rust,ignore
+#[derive(Deserialize, ToSchema)]
+struct Upload {
+    file: FilePart,
+    #[schema(max_length = 100)]
+    note: Option<String>,
+}
+
+#[route(POST, "/files")]
+async fn upload(Multipart(upload): Multipart<Upload>) -> Result<Json<usize>, ApiError> {
+    Ok(Json(upload.file.bytes.len()))
+}
+```
+
+The body is documented as `multipart/form-data`, with `FilePart` as a binary string. The published schema decides how each part is read: binary string properties are files, the rest is UTF-8 text read like a form value (`"5"` becomes `5`, repeated parts become an array). Parts are validated against the schema before `T` is built. A file part's contents aren't validated; its presence and count are.
+
+Rejections keep axum's statuses: not multipart or malformed (400), over the route's `DefaultBodyLimit` (413), a text part that isn't UTF-8 (400), and a schema violation (422). `assert_conforms` sends real multipart bodies, including invalid ones.
 
 ## Custom extractors
 
@@ -293,12 +316,14 @@ These are in-process microbenchmarks on an M1 Pro, not end-to-end HTTP latency. 
 | `validation` | yes | request validation and `verify_responses` |
 | `tracing` | yes | a span per handler, named after its `operationId` |
 | `testing` | no | `openapi_axum::testing` |
+| `multipart` | no | `Multipart<T>` bodies with `FilePart` fields (turns on `validation`) |
 | `uuid`, `chrono` | no | `Path<Uuid>`, `Path<DateTime<_>>`, `Path<NaiveDate>` |
 
 ## Limits
 
-- Extractors count as axum's when you write the bare name (`Json<T>`) or an `axum::` path. A renamed import (`use axum::Json as J`) or a type alias makes them look custom.
+- Extractors count as axum's when you write the bare name (`Json<T>`) or an `axum::` path (`openapi_axum::` for `Multipart<T>`). A renamed import (`use axum::Json as J`) or a type alias makes them look custom.
 - openapi-axum checks `ExtractorDoc` impls with `assert_conforms`. It can't prove them correct.
+- Multipart text parts are flat like form values: scalars and repeated parts. A nested object in a text part isn't parsed.
 - Validation reads a JSON body twice: once into `serde_json::Value` to check it, then into your type.
 - Recursive types need utoipa's `#[schema(no_recursion)]` on the recursive field.
 - `assert_conforms` can't generate a string for a `pattern`. Give such params and fields an `example`, and it tells you which one when it's missing.

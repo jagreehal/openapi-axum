@@ -60,7 +60,7 @@ let (router, openapi) = ApiRouter::new()
     .split();
 ```
 
-- A handler that takes `Json`, `Path`, `Query` or `Form` returns `Result<_, E>` where `E: From<Rejection>`. Rejections arrive in your error type.
+- A handler that takes `Json`, `Path`, `Query`, `Form` or `Multipart` returns `Result<_, E>` where `E: From<Rejection>`. Rejections arrive in your error type.
 - The first doc comment line is the summary, the rest the description. `#[deprecated]` marks the operation deprecated.
 - `split()` returns a plain `axum::Router` and the `OpenApi`.
 
