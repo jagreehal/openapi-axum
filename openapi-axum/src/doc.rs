@@ -235,6 +235,12 @@ impl DocCtx {
     pub fn form_body<T: ToSchema>(&mut self, op: &mut Operation) {
         self.body::<T>(op, "application/x-www-form-urlencoded");
     }
+
+    /// A `multipart/form-data` body: `T`'s properties are the parts. Binary string
+    /// properties (such as [`FilePart`](crate::FilePart) fields) are file parts.
+    pub fn multipart_body<T: ToSchema>(&mut self, op: &mut Operation) {
+        self.body::<T>(op, "multipart/form-data");
+    }
 }
 
 /// Properties and required names of an object schema, looking through `$ref`s to

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `Multipart<T>` (feature `multipart`): `multipart/form-data` bodies documented from `T`, with `FilePart` fields as binary file parts. Parts are validated against the published schema, and rejections reach your error type as `RejectionKind::Multipart`.
+- `assert_conforms` sends multipart bodies, including generated invalid ones.
+- `DocCtx::multipart_body` documents a multipart body from an `ExtractorDoc`.
+- Breaking: `RejectionKind` has a `Multipart` variant.
 - Docs site: a landing page, highlighted code in both themes, 16px article text, and plain previous/next links.
 
 ## 0.4.0

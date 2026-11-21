@@ -9,7 +9,8 @@
 //!   `NoContent` → 204, `Result<T, E>` → T's + E's). Error enums use
 //!   `#[derive(ApiResponse)]`: one `#[status(..)]` drives both the runtime status
 //!   *and* the docs.
-//! - **Params and bodies** come from `Path`, `Query`, `Json` and `Form` arguments.
+//! - **Params and bodies** come from `Path`, `Query`, `Json` and `Form` arguments, and
+//!   `Multipart` with the `multipart` feature.
 //! - **Extractor rejections** (bad JSON, bad query, bad path) are routed into your
 //!   error type via `From<Rejection>`, so they're documented too, and the compiler
 //!   insists you handle them.
@@ -72,6 +73,8 @@
 pub struct ReadmeDoctests;
 
 mod doc;
+#[cfg(feature = "multipart")]
+mod multipart;
 mod rejection;
 mod response;
 mod router;
@@ -82,6 +85,8 @@ pub mod testing;
 mod validation;
 
 pub use doc::{DocCtx, ExtractorDoc, PathValue};
+#[cfg(feature = "multipart")]
+pub use multipart::{FilePart, Multipart};
 pub use openapi_axum_macros::{ApiResponse, route};
 pub use rejection::{Rejection, RejectionKind};
 pub use response::{Accepted, ApiResponse, Created, HeaderText, InvalidHeaderText, NoContent, ResponseHeader};

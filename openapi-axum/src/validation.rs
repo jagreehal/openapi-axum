@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 
 use crate::{Rejection, RejectionKind};
 
-fn invalid(kind: RejectionKind, message: String) -> Rejection {
+pub(crate) fn invalid(kind: RejectionKind, message: String) -> Rejection {
     Rejection { kind, status: StatusCode::UNPROCESSABLE_ENTITY, message }
 }
 
@@ -20,7 +20,7 @@ fn invalid(kind: RejectionKind, message: String) -> Rejection {
 /// `ApiRouter` fall back to `T`'s own schema. A registered route whose operation is
 /// missing from the document fails closed.
 #[cfg(feature = "validation")]
-fn published(
+pub(crate) fn published(
     extensions: &axum::http::Extensions,
     kind: RejectionKind,
 ) -> Result<Option<(std::sync::Arc<crate::spec_index::SpecIndex>, crate::spec_index::OpKey)>, Rejection> {
@@ -214,7 +214,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ParamsGuard {
 }
 
 #[cfg(feature = "validation")]
-mod body {
+pub(crate) mod body {
     use std::any::TypeId;
     use std::collections::HashMap;
     use std::sync::{Arc, OnceLock, PoisonError, RwLock};
@@ -227,7 +227,7 @@ mod body {
     /// One compiled validator per body type, plus a root (components + the body schema
     /// under `__body`) for resolving refs during form coercion. Cached for the process
     /// lifetime, keyed by `TypeId`.
-    pub(super) fn schema_for<T: ToSchema + 'static>() -> Compiled {
+    pub(crate) fn schema_for<T: ToSchema + 'static>() -> Compiled {
         static CACHE: OnceLock<RwLock<HashMap<TypeId, Compiled>>> = OnceLock::new();
         let cache = CACHE.get_or_init(Default::default);
         if let Some(hit) = cache.read().unwrap_or_else(PoisonError::into_inner).get(&TypeId::of::<T>()) {

@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 use tower::ServiceExt;
 use utoipa::openapi::OpenApi;
 
-use crate::spec_index::{ArrayStyle, SpecIndex, array_style};
+use crate::spec_index::{ArrayStyle, PartKind, SpecIndex, array_style, multipart_instance, part_kind};
 
 fn resolve<'a>(spec: &'a Value, schema: &'a Value) -> &'a Value {
     match schema.get("$ref").and_then(Value::as_str).and_then(|r| spec.pointer(r.trim_start_matches('#'))) {
@@ -316,8 +316,15 @@ impl Input {
         if self.location == "body" { "body".into() } else { format!("{} parameter `{}`", self.location, self.name) }
     }
 
+    fn is_multipart(&self) -> bool {
+        self.location == "body" && crate::spec_index::essence(&self.name) == "multipart/form-data"
+    }
+
     /// Can `value` be sent in this input's place and read back as the same value?
-    fn representable(&self, value: &Value) -> bool {
+    fn representable(&self, spec: &Value, value: &Value) -> bool {
+        if self.is_multipart() {
+            return multipart_representable(spec, &self.schema, value);
+        }
         let scalar_ok = |v: &Value| match v {
             Value::String(s) => !(s.is_empty() && self.location == "path"),
             Value::Number(_) | Value::Bool(_) => true,
@@ -332,8 +339,79 @@ impl Input {
     }
 }
 
+/// Can `value` travel as multipart parts and be read back as itself? Text fields
+/// must survive coercion from their text (`5` does, `"5"` for an integer field
+/// doesn't), and a file field's content is opaque, so it only has to be a string that
+/// passes or fails the schema just as the empty placeholder the server validates does.
+fn multipart_representable(spec: &Value, schema: &Value, value: &Value) -> bool {
+    let Value::Object(fields) = value else { return false };
+    let (mut text, mut files, mut expected) = (Vec::new(), Vec::new(), Map::new());
+    for (name, v) in fields {
+        let kind = part_kind(spec, schema, name);
+        let items: Vec<&Value> = match v {
+            Value::Array(items) if kind != PartKind::File => items.iter().collect(),
+            other => vec![other],
+        };
+        if items.is_empty() {
+            return false; // an empty array sends no part at all
+        }
+        if kind == PartKind::Text {
+            text.extend(items.into_iter().map(|i| (name.clone(), scalar(i))));
+            expected.insert(name.clone(), v.clone());
+        } else {
+            if !items.iter().all(|i| i.is_string()) {
+                return false;
+            }
+            files.push((name.clone(), items.len()));
+            let placeholder = match v {
+                Value::Array(items) => json!(vec![""; items.len()]),
+                _ => json!(""),
+            };
+            expected.insert(name.clone(), placeholder);
+        }
+    }
+    let server = multipart_instance(spec, schema, &text, &files);
+    server == Value::Object(expected) && valid(spec, schema, value) == valid(spec, schema, &server)
+}
+
+const BOUNDARY: &str = "openapi-axum-conformance";
+
+/// `value`'s fields as `multipart/form-data` parts: file fields (per the schema) as
+/// files named after the field, everything else as text, arrays as repeated parts.
+fn multipart_body(spec: &Value, schema: &Value, value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, v) in value.as_object().into_iter().flatten() {
+        let kind = part_kind(spec, schema, name);
+        let items: Vec<&Value> = match v {
+            Value::Array(items) if kind != PartKind::File => items.iter().collect(),
+            other => vec![other],
+        };
+        for item in items {
+            out.extend_from_slice(
+                format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"").as_bytes(),
+            );
+            if kind != PartKind::Text {
+                out.extend_from_slice(
+                    format!("; filename=\"{name}.bin\"\r\nContent-Type: application/octet-stream").as_bytes(),
+                );
+            }
+            out.extend_from_slice(b"\r\n\r\n");
+            out.extend_from_slice(scalar(item).as_bytes());
+            out.extend_from_slice(b"\r\n");
+        }
+    }
+    out.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    out
+}
+
 /// A request for `inputs`, with `values[i]` for input `i` (`None`: leave it out).
-fn request_with(path: &str, method: &Method, inputs: &[Input], values: &[Option<Value>]) -> Request<Body> {
+fn request_with(
+    spec: &Value,
+    path: &str,
+    method: &Method,
+    inputs: &[Input],
+    values: &[Option<Value>],
+) -> Request<Body> {
     let mut uri = path.to_owned();
     let mut query = Vec::new();
     let mut cookies = Vec::new();
@@ -343,6 +421,11 @@ fn request_with(path: &str, method: &Method, inputs: &[Input], values: &[Option<
         let Some(value) = value else { continue };
         let name = input.name.as_str();
         if input.location == "body" {
+            if input.is_multipart() {
+                req = req.header("content-type", format!("multipart/form-data; boundary={BOUNDARY}"));
+                body = Body::from(multipart_body(spec, &input.schema, value));
+                continue;
+            }
             req = req.header("content-type", name);
             body = if name.starts_with("application/x-www-form-urlencoded") {
                 let pairs: Vec<(String, String)> =
@@ -409,7 +492,7 @@ fn default_values(spec: &Value, at: &str, inputs: &[Input]) -> Vec<Option<Value>
 pub fn request_from_spec(spec: &Value, path: &str, method: &Method, op: &Value) -> Request<Body> {
     let inputs = inputs(spec, op);
     let values = default_values(spec, &format!("{method} {path}"), &inputs);
-    request_with(path, method, &inputs, &values)
+    request_with(spec, path, method, &inputs, &values)
 }
 
 /// Up to `n` distinct valid value sets, after the default one: the k-th candidate of
@@ -421,7 +504,7 @@ fn valid_cases(spec: &Value, inputs: &[Input], defaults: &[Option<Value>], n: us
         .map(|(input, default)| {
             let mut c: Vec<Value> = default.iter().cloned().collect();
             for v in candidates(spec, &input.schema, n) {
-                if input.representable(&v) && !c.contains(&v) {
+                if input.representable(spec, &v) && !c.contains(&v) {
                     c.push(v);
                 }
             }
@@ -658,7 +741,7 @@ fn placement(spec: &Value, scheme: &str, credential: Option<&str>) -> Option<Pla
 /// Then it generates more requests from the schemas ([`cases`](Self::cases)):
 /// - **valid variants** (other values, boundary values, optional params and fields
 ///   included) must pass the same rules,
-/// - **invalid variants** (one path/query param or JSON body broken at a time: out of
+/// - **invalid variants** (one path/query param, JSON body or multipart body broken at a time: out of
 ///   range, too long, wrong type, missing required field, ...) must be rejected with
 ///   400/415/422 (or 404 for a path param), and that rejection must match the document.
 ///
@@ -858,8 +941,9 @@ impl<'a> Conformance<'a> {
             let key = format!("{method} {path}");
             let ins = inputs(&spec, &op);
             let (defaults, fixed) = self.base_values(&spec, &key, &ins);
-            let sent =
-                self.send(&index, &spec, &path, &op, &key, &key, request_with(&path, &method, &ins, &defaults)).await;
+            let sent = self
+                .send(&index, &spec, &path, &op, &key, &key, request_with(&spec, &path, &method, &ins, &defaults))
+                .await;
             let expected = self.expected.iter().find(|(k, _)| *k == key).map(|(_, s)| *s);
             if let Some(want) = expected {
                 assert_eq!(sent.status, want, "{key}: expected {want}, got {}: {}", sent.status, sent.body);
@@ -900,7 +984,7 @@ impl<'a> Conformance<'a> {
                         }
                     }
                     let case = format!("{key} (generated valid request: {})", describe(&ins, &values));
-                    let req = request_with(&path, &method, &ins, &values);
+                    let req = request_with(&spec, &path, &method, &ins, &values);
                     let sent = self.send(&index, &spec, &path, &op, &key, &case, req).await;
                     sent.accepted(&case);
                     entry.valid_cases += 1;
@@ -908,9 +992,10 @@ impl<'a> Conformance<'a> {
                 }
                 for (i, input) in ins.iter().enumerate() {
                     // Headers and cookies belong to their extractors; forms lose JSON types.
+                    // Multipart values that don't survive the trip are filtered out below.
                     let checked = match input.location.as_str() {
                         "path" | "query" => true,
-                        "body" => input.name.contains("json"),
+                        "body" => input.name.contains("json") || input.is_multipart(),
                         _ => false,
                     };
                     if !checked {
@@ -920,7 +1005,7 @@ impl<'a> Conformance<'a> {
                     let wire = input.location != "body";
                     let bad: Vec<(String, Value)> = invalid_values(&spec, &input.schema, wire)
                         .into_iter()
-                        .filter(|(_, v)| input.representable(v))
+                        .filter(|(_, v)| input.representable(&spec, v))
                         .take(self.cases)
                         .collect();
                     if bad.is_empty() {
@@ -931,7 +1016,7 @@ impl<'a> Conformance<'a> {
                         values[i] = Some(value.clone());
                         let case =
                             format!("{key} (generated invalid request, {}: {label}, value {value})", input.describe());
-                        let req = request_with(&path, &method, &ins, &values);
+                        let req = request_with(&spec, &path, &method, &ins, &values);
                         let sent = self.send(&index, &spec, &path, &op, &key, &case, req).await;
                         let rejected = matches!(sent.status.as_u16(), 400 | 415 | 422)
                             || (input.location == "path" && sent.status == StatusCode::NOT_FOUND);

@@ -9,6 +9,8 @@ pub enum RejectionKind {
     Path,
     Query,
     Form,
+    /// A `multipart/form-data` body (feature `multipart`).
+    Multipart,
 }
 
 /// An extractor rejection (malformed JSON, bad query string, unparsable path...).
@@ -39,11 +41,16 @@ from_axum!(
     FormRejection => Form,
     RawPathParamsRejection => Path
 );
+#[cfg(feature = "multipart")]
+from_axum!(
+    axum::extract::multipart::MultipartRejection => Multipart,
+    axum::extract::multipart::MultipartError => Multipart
+);
 
 /// Response types that can carry an extractor rejection.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't carry extractor rejections",
-    label = "this handler uses Json/Path/Query/Form, so its return type must be able to report a bad request",
+    label = "this handler uses Json/Path/Query/Form/Multipart, so its return type must be able to report a bad request",
     note = "return `Result<_, E>` where `E: From<openapi_axum::Rejection>`, or mark the argument `#[raw]` to keep axum's default rejection"
 )]
 pub trait FromRejection {
